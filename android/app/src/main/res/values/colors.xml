@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="bgRetro">#0B0420</color>
+    <color name="colorPrimary">#0B0420</color>
+    <color name="colorPrimaryDark">#0B0420</color>
+    <color name="colorAccent">#FF2BD6</color>
+</resources>

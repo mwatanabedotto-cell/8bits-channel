@@ -1,3 +1,4 @@
 node_modules/
 .iptv/
 public/data/
+*.apk

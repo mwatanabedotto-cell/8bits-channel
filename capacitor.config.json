@@ -1,0 +1,13 @@
+{
+  "appId": "io.github.bits8.channel",
+  "appName": "8bits Channel",
+  "webDir": "public",
+  "server": {
+    "androidScheme": "http",
+    "cleartext": true
+  },
+  "android": {
+    "allowMixedContent": true,
+    "backgroundColor": "#0b0420"
+  }
+}

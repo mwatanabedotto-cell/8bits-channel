@@ -44,6 +44,37 @@ Share Tech Mono y VT323. Las animaciones se desactivan si el sistema pide
 - Selector de fuente cuando un canal tiene varias, logos y calidad.
 - Diseño adaptable a móvil.
 
+## 📱 App Android (APK)
+
+El mismo visor empaquetado como app nativa con [Capacitor](https://capacitorjs.com/)
+(carpeta `android/`). Funciona en móviles, tablets y **Android TV / TV Box**
+(se maneja con el mando y aparece en el lanzador de la TV).
+
+**Descargar:** [última APK](../../releases/latest/download/8bits-channel.apk)
+(o en *Releases*). Ábrela en el Android y permite «instalar apps desconocidas».
+
+Diferencias con la web:
+- La lista de canales se descarga de la web publicada (actualizada cada día);
+  la APK lleva una copia de respaldo.
+- Reproduce también streams `http://` (en la web los bloquea el navegador).
+- El botón «atrás» cierra el menú o el reproductor antes de salir.
+
+El workflow `.github/workflows/android.yml` compila la APK en cada cambio y,
+en `main`, la publica en *Releases*.
+
+Firma: sin configurar nada, la APK se firma con una clave de depuración
+(funciona, pero al actualizar puede pedir desinstalar la anterior). Para una
+firma fija, crea una clave y guárdala en *Settings → Secrets and variables →
+Actions* como `ANDROID_KEYSTORE_BASE64` (el archivo .keystore en base64),
+`ANDROID_KEYSTORE_PASSWORD` y `ANDROID_KEY_ALIAS`. Nunca subas la clave al
+repositorio.
+
+Compilar en local (requiere Android SDK y JDK 21):
+
+```bash
+npm ci && npx cap sync android && (cd android && ./gradlew assembleRelease)
+```
+
 ## Publicarlo en GitHub Pages
 
 1. Fusiona esta rama en `main`.

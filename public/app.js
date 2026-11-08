@@ -7,6 +7,11 @@ const PREFS_KEY = 'iptv.prefs.v1';
 const BROKEN_TTL = 3 * 24 * 3600 * 1000; // se reintenta a los 3 días
 const PLAY_TIMEOUT = 20000;
 const PAGE = 240;
+// Dentro de la APK (Capacitor) los datos se descargan de la web publicada,
+// que se actualiza a diario; la copia incluida en la APK es el respaldo.
+const IS_APP = !!window.Capacitor?.isNativePlatform?.();
+const SITE_URL = 'https://mwatanabedotto-cell.github.io/8bits-channel/';
+const DATA_URLS = IS_APP ? [SITE_URL + 'data/channels.json', 'data/channels.json'] : ['data/channels.json'];
 
 const $ = (s) => document.querySelector(s);
 const store = {
@@ -114,6 +119,8 @@ function renderSidebar() {
       nm.textContent = c.name;
       count.textContent = cCount.get(c.code) || 0;
       li.onclick = () => { state.country = state.country === c.code ? null : c.code; update(); closeMenu(); };
+      li.tabIndex = 0; // navegable con teclado / mando de TV
+      li.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); li.onclick(); } };
       return li;
     }),
   );
@@ -392,18 +399,49 @@ function toast(text) {
 
 function closeMenu() { $('#sidebar').classList.remove('open'); }
 
+function closePlayer() {
+  stopPlayback();
+  playing = null;
+  $('#player').hidden = true;
+  document.querySelectorAll('.card.playing').forEach((c) => c.classList.remove('playing'));
+}
+
+// Ajustes propios de la APK de Android
+function setupApp() {
+  document.documentElement.classList.add('is-app');
+  document.querySelector('.toggle').lastChild.textContent = ' Solo canales reproducibles en la app';
+  const m3u = document.querySelector('a[href="data/playlist.m3u"]');
+  if (m3u) { m3u.href = SITE_URL + 'data/playlist.m3u'; m3u.removeAttribute('download'); m3u.target = '_blank'; }
+  // Botón «atrás»: cierra pantalla completa, menú o reproductor antes de salir.
+  window.Capacitor.Plugins?.App?.addListener('backButton', () => {
+    if (document.fullscreenElement) document.exitFullscreen();
+    else if ($('#sidebar').classList.contains('open')) closeMenu();
+    else if (playing) closePlayer();
+    else window.Capacitor.Plugins.App.exitApp();
+  });
+}
+
 // ---------- Inicio ----------
 async function init() {
   $('#list').innerHTML = '<p class="empty"><b class="tuning">CARGANDO</b>Recibiendo la lista de canales…</p>';
   let data;
-  try {
-    const res = await fetch('data/channels.json', { cache: 'no-cache' });
-    if (!res.ok) throw new Error(res.status);
-    data = await res.json();
-  } catch (e) {
-    $('#list').innerHTML = '<p class="empty">No se pudo cargar data/channels.json. Ejecuta <code>npm run build</code>.</p>';
+  for (const url of DATA_URLS) {
+    try {
+      const res = await fetch(url, { cache: 'no-cache' });
+      if (!res.ok) throw new Error(res.status);
+      data = await res.json();
+      break;
+    } catch (e) {
+      console.warn('No se pudo cargar', url, e);
+    }
+  }
+  if (!data) {
+    $('#list').innerHTML = IS_APP
+      ? '<p class="empty"><b>SIN SEÑAL</b>No se pudo descargar la lista de canales. Revisa tu conexión a Internet.</p>'
+      : '<p class="empty"><b>SIN SEÑAL</b>No se pudo cargar data/channels.json. Ejecuta <code>npm run build</code>.</p>';
     return;
   }
+  if (IS_APP) setupApp();
   state.countries = new Map(data.meta.countries.map((c) => [c.code, { ...c, name: localCountryName(c.code, c.name) }]));
   state.categories = new Map(data.meta.categories.map((c) => [c.id, { ...c, name: CAT_ES[c.id] || c.name }]));
   state.updated = new Date(data.meta.updated).toLocaleDateString('es', { day: 'numeric', month: 'short', year: 'numeric' });
@@ -431,8 +469,7 @@ async function init() {
   $('#clearCountry').onclick = () => { state.country = null; update(); };
   $('#resetBroken').onclick = () => { state.broken.clear(); saveBroken(); refreshUsable(); update(); };
   $('#streamSelect').onchange = (e) => { stopPlayback(); playing.index = Number(e.target.value); startStream(); };
-  $('#closePlayer').onclick = () => { stopPlayback(); playing = null; $('#player').hidden = true;
-    document.querySelectorAll('.card.playing').forEach((c) => c.classList.remove('playing')); };
+  $('#closePlayer').onclick = closePlayer;
   $('#menuBtn').onclick = () => $('#sidebar').classList.toggle('open');
 
   new IntersectionObserver((entries) => {
