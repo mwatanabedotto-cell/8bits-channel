@@ -17,14 +17,23 @@
   --accent: var(--cyan);
   --glow-c: 0 0 6px rgba(0, 240, 255, 0.7), 0 0 18px rgba(0, 240, 255, 0.35);
   --glow-m: 0 0 6px rgba(255, 43, 214, 0.8), 0 0 18px rgba(255, 43, 214, 0.4);
-  --font-display: "Orbitron", "Eurostile", "Arial Black", sans-serif;
-  --font-mono: "Share Tech Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
-  --font-crt: "VT323", "Share Tech Mono", monospace;
+  --font-display: "Twemoji Country Flags", "Orbitron", "Eurostile", "Arial Black", sans-serif;
+  --font-mono: "Twemoji Country Flags", "Share Tech Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  --font-crt: "Twemoji Country Flags", "VT323", "Share Tech Mono", monospace;
   /* Zona segura (barra de estado / navegación en la app Android y móviles con notch) */
   --sat: env(safe-area-inset-top, 0px);
   --sab: env(safe-area-inset-bottom, 0px);
   --top-h: calc(62px + var(--sat));
   color-scheme: dark;
+}
+
+/* Banderas de países: Windows no trae emojis de banderas (muestra «BR», «AR»…).
+   Esta fuente solo se usa para los caracteres de bandera (unicode-range). */
+@font-face {
+  font-family: "Twemoji Country Flags";
+  unicode-range: U+1F1E6-1F1FF, U+1F3F4, U+E0062-E0063, U+E0065, U+E0067, U+E006C, U+E006E, U+E0073-E0074, U+E0077, U+E007F;
+  src: url("vendor/TwemojiCountryFlags.woff2") format("woff2");
+  font-display: swap;
 }
 
 * { box-sizing: border-box; }
