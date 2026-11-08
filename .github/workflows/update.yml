@@ -1,0 +1,53 @@
+name: Verificar canales y publicar
+
+on:
+  schedule:
+    - cron: '17 4 * * *' # todos los días a las 04:17 UTC
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Descargar listas de iptv-org/iptv (para el país de los streams sin canal)
+        run: git clone --depth 1 https://github.com/iptv-org/iptv.git .iptv
+
+      - name: Tests
+        run: npm test
+
+      - name: Verificar streams y generar datos
+        run: node scripts/build.mjs --iptv-dir .iptv --concurrency 100 --timeout 12000
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: public
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
