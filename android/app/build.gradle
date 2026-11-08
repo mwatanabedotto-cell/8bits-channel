@@ -34,7 +34,7 @@ android {
     }
     buildTypes {
         release {
-            signingConfig (ksFile && file(ksFile).exists()) ? signingConfigs.fixed : signingConfigs.debug
+            signingConfig = (ksFile && file(ksFile).exists()) ? signingConfigs.fixed : signingConfigs.debug
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }

@@ -313,6 +313,48 @@ video { width: 100%; height: 100%; display: block; background: #000; }
 .player-info > div { flex: 1; min-width: 0; }
 .player-info select { width: auto; max-width: 240px; }
 
+/* ---------- Zapping estilo TV ---------- */
+.osd {
+  position: absolute; left: 4%; right: 4%; bottom: 14%; z-index: 4; pointer-events: none;
+  display: flex; align-items: center; gap: 18px; padding: 12px 18px;
+  background: linear-gradient(90deg, rgba(8, 2, 26, 0.92), rgba(40, 8, 70, 0.75));
+  border-left: 4px solid var(--magenta); box-shadow: 0 0 24px rgba(255, 43, 214, 0.35);
+  animation: osd-in .25s ease-out;
+}
+@keyframes osd-in { from { transform: translateY(14px); opacity: 0; } }
+.osd-num {
+  font: clamp(40px, 7vw, 84px)/0.9 var(--font-crt); color: var(--cyan);
+  text-shadow: var(--glow-c); letter-spacing: 0.05em; min-width: 2.2em;
+}
+.osd-body { min-width: 0; }
+.osd-name {
+  font: 900 clamp(16px, 2.4vw, 30px) var(--font-display); font-style: italic; color: #fff;
+  text-shadow: var(--glow-m); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.osd-meta { color: var(--muted); font-size: clamp(11px, 1.3vw, 15px); letter-spacing: 0.05em; margin-top: 4px; }
+.zap {
+  position: absolute; right: 12px; z-index: 4; width: 44px; height: 44px;
+  background: rgba(8, 2, 26, 0.6); color: var(--cyan); border: 1px solid var(--cyan);
+  font-size: 18px; cursor: pointer; opacity: 0; transition: opacity .2s, box-shadow .2s;
+}
+.zap-up { top: calc(50% - 52px); }
+.zap-down { top: calc(50% + 8px); }
+.video-wrap:hover .zap, .video-wrap:focus-within .zap, .zap:focus-visible { opacity: 1; }
+.zap:hover, .zap:focus-visible { box-shadow: var(--glow-c); outline: none; }
+@media (hover: none) { .zap { opacity: 0.75; } }
+.zapbar { display: flex; gap: 6px; }
+.zapbar .icon-btn { font: 13px var(--font-display); letter-spacing: 0.05em; padding: 7px 10px; }
+.video-wrap:focus-visible { outline: 2px solid var(--magenta); outline-offset: 2px; }
+/* Pantalla completa: todo el monitor para el vídeo, con OSD y botones */
+.video-wrap:fullscreen { max-height: none; aspect-ratio: auto; border: 0; border-radius: 0; width: 100vw; height: 100vh; }
+.video-wrap:fullscreen::after { border-radius: 0; }
+.video-wrap:fullscreen video { object-fit: contain; }
+/* Número de canal en las tarjetas */
+.chnum {
+  position: absolute; top: 4px; left: 6px; z-index: 1;
+  font: 18px/1 var(--font-crt); color: var(--cyan); text-shadow: var(--glow-c); letter-spacing: 0.05em;
+}
+
 /* ---------- Aviso tipo terminal ---------- */
 .toast {
   position: fixed; bottom: calc(22px + var(--sab)); left: 50%; transform: translateX(-50%); z-index: 50;
@@ -342,11 +384,14 @@ video { width: 100%; height: 100%; display: block; background: #000; }
   main { padding: 14px 14px calc(40px + var(--sab)); }
   .grid { grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 10px; }
   .group-title { font-size: 17px; }
+  .player-info { flex-wrap: wrap; }
   .player-info select { max-width: 120px; }
+  .zapbar { width: 100%; }
+  .zapbar .icon-btn { flex: 1; padding: 10px; }
 }
 
 /* Sin animaciones para quien lo prefiera */
 @media (prefers-reduced-motion: reduce) {
-  .floor, .onair, .tuning::after { animation: none; }
+  .floor, .onair, .tuning::after, .osd { animation: none; }
   .card, .card:hover { transition: none; transform: none; }
 }

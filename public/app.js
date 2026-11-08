@@ -4,6 +4,7 @@
 
 const BROKEN_KEY = 'iptv.broken.v1';
 const PREFS_KEY = 'iptv.prefs.v1';
+const LAST_KEY = 'iptv.last.v1';
 const BROKEN_TTL = 3 * 24 * 3600 * 1000; // se reintenta a los 3 días
 const PLAY_TIMEOUT = 20000;
 const PAGE = 240;
@@ -29,6 +30,8 @@ const state = {
   cats: new Set(),
   group: 'country',
   browserOnly: true,
+  lineup: [],
+  byNum: new Map(),
   ...restorePrefs(),
 };
 let renderQueue = [];
@@ -187,15 +190,19 @@ function renderList() {
   currentGrid = null;
   if (!list.length) {
     root.innerHTML = '<p class="empty"><b>SIN SEÑAL</b>No hay canales con estos filtros.</p>';
+    state.lineup = [];
     return;
   }
+  const lineup = new Set();
   for (const g of buildGroups(list)) {
     renderQueue.push({ type: 'group', title: g.title, count: g.count });
+    for (const sg of g.subs) for (const ch of sg.channels) lineup.add(ch);
     for (const s of g.subs) {
       renderQueue.push({ type: 'sub', title: s.title, count: s.channels.length });
       for (const ch of s.channels) renderQueue.push({ type: 'card', ch });
     }
   }
+  state.lineup = [...lineup]; // orden de zapping = orden en pantalla
   renderMore();
 }
 
@@ -240,6 +247,10 @@ function card(ch) {
     img.onerror = () => { logo.textContent = '📺'; };
     logo.append(img);
   } else logo.textContent = '📺';
+  const num = document.createElement('span');
+  num.className = 'chnum';
+  num.textContent = fmtNum(ch._num);
+  logo.append(num);
   const name = document.createElement('div');
   name.className = 'name';
   name.textContent = ch.name;
@@ -275,10 +286,14 @@ function stopPlayback() {
   v.load();
 }
 
-function play(ch, index = 0) {
+const fmtNum = (n) => String(n).padStart(3, '0');
+
+function play(ch, index = 0, { dir = 0, skips = 0 } = {}) {
   stopPlayback();
   const streams = ch._usable.slice();
-  playing = { channel: ch, streams, index };
+  playing = { channel: ch, streams, index, dir, skips };
+  store.set(LAST_KEY, ch.id);
+  showOsd(ch);
   document.querySelectorAll('.card.playing').forEach((c) => c.classList.remove('playing'));
   document.querySelector(`.card[data-id="${CSS.escape(ch.id)}"]`)?.classList.add('playing');
 
@@ -293,7 +308,7 @@ function play(ch, index = 0) {
     `Fuente ${i + 1}${s.quality ? ` · ${s.quality}` : ''}${browserPlayable(s) ? '' : ' (externa)'}`, i)));
   sel.value = index;
   sel.hidden = streams.length < 2;
-  $('main').scrollTo({ top: 0, behavior: 'smooth' });
+  if (!document.fullscreenElement) $('main').scrollTo({ top: 0, behavior: 'smooth' });
   startStream();
 }
 
@@ -381,7 +396,99 @@ function onStreamFail(p, why) {
   showMsg(`<b class="nosignal">SIN SEÑAL</b><br>${escapeHtml(p.channel.name)} no está accesible y se ha eliminado de la lista.`);
   toast(`✕ ELIMINADO · ${p.channel.name} (no accesible)`);
   document.querySelector(`.card[data-id="${CSS.escape(p.channel.id)}"]`)?.remove();
+  const removedIdx = state.lineup.indexOf(p.channel);
+  state.lineup = state.lineup.filter((c) => c._usable.length);
   renderSidebar();
+  // Haciendo zapping, como en una TV: se salta solo al siguiente canal.
+  if (p.dir && p.skips < 15 && state.lineup.length) {
+    setTimeout(() => {
+      if (playing !== p) return;
+      const i = p.dir > 0 ? removedIdx : removedIdx - 1;
+      const next = state.lineup[(i + state.lineup.length) % state.lineup.length];
+      play(next, 0, { dir: p.dir, skips: p.skips + 1 });
+    }, 1200);
+  }
+}
+
+// ---------- Zapping estilo TV ----------
+function zap(delta) {
+  const list = state.lineup;
+  if (!list.length) return;
+  let i = playing ? list.indexOf(playing.channel) : -1;
+  if (i === -1) i = delta > 0 ? -1 : 0;
+  const next = list[(i + delta + list.length) % list.length];
+  play(next, 0, { dir: delta });
+}
+
+let osdTimer;
+function showOsd(ch, typed) {
+  const osd = $('#osd');
+  osd.querySelector('.osd-num').textContent = typed ?? fmtNum(ch._num);
+  osd.querySelector('.osd-name').textContent = typed ? '' : ch.name;
+  osd.querySelector('.osd-meta').textContent = typed
+    ? 'Introduce el número de canal'
+    : `${countryFlag(ch.country)} ${countryName(ch.country)} · ${ch.categories.map(catName).join(', ')}`;
+  osd.hidden = false;
+  clearTimeout(osdTimer);
+  osdTimer = setTimeout(() => { osd.hidden = true; }, typed ? 2500 : 3500);
+}
+
+// Teclear el número de canal con el mando o el teclado (como en la TV)
+let numBuf = '';
+let numTimer;
+function typeDigit(d) {
+  numBuf = (numBuf + d).slice(-4);
+  $('#player').hidden = false;
+  showOsd(null, numBuf.padEnd(3, '_'));
+  clearTimeout(numTimer);
+  numTimer = setTimeout(() => {
+    const n = Number(numBuf);
+    numBuf = '';
+    const ch = state.byNum.get(n);
+    if (ch && ch._usable.length) play(ch);
+    else { toast(`CANAL ${fmtNum(n)} NO DISPONIBLE`); if (playing) showOsd(playing.channel); else $('#player').hidden = true; }
+  }, 1500);
+}
+
+function toggleFullscreen() {
+  const wrap = $('.video-wrap');
+  if (document.fullscreenElement) document.exitFullscreen();
+  else wrap.requestFullscreen?.().catch(() => {});
+}
+
+function onKey(e) {
+  const t = e.target;
+  const typing = t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA';
+  if (typing) return;
+  const full = !!document.fullscreenElement;
+  const videoFocused = t.closest?.('.video-wrap') || t === document.body;
+  const k = e.key;
+  const code = e.keyCode;
+  // Teclas de canal del mando (KEYCODE_CHANNEL_UP/DOWN = 166/167) y Re Pág / Av Pág
+  const chUp = k === 'ChannelUp' || k === 'PageUp' || code === 166;
+  const chDown = k === 'ChannelDown' || k === 'PageDown' || code === 167;
+  // Flechas ▲▼: cambian canal en pantalla completa o con el foco en el vídeo
+  const arrowZap = playing && (full || (videoFocused && !$('#sidebar').classList.contains('open')));
+  if (chUp || (arrowZap && k === 'ArrowUp')) { e.preventDefault(); zap(+1); return; }
+  if (chDown || (arrowZap && k === 'ArrowDown')) { e.preventDefault(); zap(-1); return; }
+  if (/^[0-9]$/.test(k)) { e.preventDefault(); typeDigit(k); return; }
+  if (playing && (k === 'i' || k === 'Info' || (full && k === 'Enter'))) { e.preventDefault(); showOsd(playing.channel); return; }
+  if (playing && (k === 'f' || k === 'F')) { e.preventDefault(); toggleFullscreen(); }
+}
+
+// Deslizar arriba/abajo sobre el vídeo cambia de canal (móvil)
+function setupSwipe() {
+  const wrap = $('.video-wrap');
+  let y0 = null;
+  let x0 = null;
+  wrap.addEventListener('touchstart', (e) => { y0 = e.touches[0].clientY; x0 = e.touches[0].clientX; }, { passive: true });
+  wrap.addEventListener('touchend', (e) => {
+    if (y0 === null) return;
+    const dy = e.changedTouches[0].clientY - y0;
+    const dx = e.changedTouches[0].clientX - x0;
+    y0 = null;
+    if (Math.abs(dy) > 70 && Math.abs(dy) > Math.abs(dx) * 1.5) zap(dy < 0 ? +1 : -1);
+  }, { passive: true });
 }
 
 function escapeHtml(s) {
@@ -400,6 +507,7 @@ function toast(text) {
 function closeMenu() { $('#sidebar').classList.remove('open'); }
 
 function closePlayer() {
+  if (document.fullscreenElement) document.exitFullscreen();
   stopPlayback();
   playing = null;
   $('#player').hidden = true;
@@ -450,6 +558,13 @@ async function init() {
     _search: `${ch.name} ${ch.streams.map((s) => s.title || '').join(' ')}`.toLowerCase(),
   }));
   if (state.country && !state.countries.has(state.country)) state.country = null;
+  // Números de canal fijos (por país, enfoque y nombre), como en una TV.
+  const order = state.channels.slice().sort((a, b) =>
+    countryName(a.country).localeCompare(countryName(b.country), 'es') ||
+    catName(a.categories[0]).localeCompare(catName(b.categories[0]), 'es') ||
+    a.name.localeCompare(b.name, 'es'));
+  state.byNum = new Map();
+  order.forEach((ch, i) => { ch._num = i + 1; state.byNum.set(i + 1, ch); });
   refreshUsable();
 
   $('#browserOnly').checked = state.browserOnly;
@@ -470,6 +585,13 @@ async function init() {
   $('#resetBroken').onclick = () => { state.broken.clear(); saveBroken(); refreshUsable(); update(); };
   $('#streamSelect').onchange = (e) => { stopPlayback(); playing.index = Number(e.target.value); startStream(); };
   $('#closePlayer').onclick = closePlayer;
+  $('#chUp').onclick = $('#zapUp').onclick = () => zap(+1);
+  $('#chDown').onclick = $('#zapDown').onclick = () => zap(-1);
+  $('#fullBtn').onclick = toggleFullscreen;
+  $('.video-wrap').tabIndex = 0;
+  $('.video-wrap').ondblclick = toggleFullscreen;
+  document.addEventListener('keydown', onKey);
+  setupSwipe();
   $('#menuBtn').onclick = () => $('#sidebar').classList.toggle('open');
 
   new IntersectionObserver((entries) => {
@@ -477,6 +599,10 @@ async function init() {
   }, { root: $('main'), rootMargin: '800px' }).observe($('#sentinel'));
 
   update();
+
+  // En la app (TV / móvil) se continúa con el último canal visto, como una TV.
+  const last = IS_APP && state.channels.find((c) => c.id === store.get(LAST_KEY, null));
+  if (last && last._usable.length) play(last);
 }
 
 init();

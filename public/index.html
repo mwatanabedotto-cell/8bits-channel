@@ -56,9 +56,15 @@
     <main>
       <section id="player" class="player" hidden>
         <div class="video-wrap">
-          <video id="video" controls playsinline autoplay></video>
+          <video id="video" controls controlslist="nofullscreen" disablepictureinpicture playsinline autoplay></video>
           <div id="playerMsg" class="player-msg" hidden></div>
           <span class="onair">● EN VIVO</span>
+          <div id="osd" class="osd" hidden aria-live="polite">
+            <div class="osd-num"></div>
+            <div class="osd-body"><div class="osd-name"></div><div class="osd-meta"></div></div>
+          </div>
+          <button id="zapUp" class="zap zap-up" aria-label="Canal siguiente">▲</button>
+          <button id="zapDown" class="zap zap-down" aria-label="Canal anterior">▼</button>
         </div>
         <div class="player-info">
           <img id="playerLogo" alt="" />
@@ -67,6 +73,11 @@
             <p id="playerMeta"></p>
           </div>
           <select id="streamSelect" aria-label="Fuente"></select>
+          <div class="zapbar">
+            <button id="chDown" class="icon-btn" aria-label="Canal anterior" title="Canal anterior (▼ / Página abajo)">CH▼</button>
+            <button id="chUp" class="icon-btn" aria-label="Canal siguiente" title="Canal siguiente (▲ / Página arriba)">CH▲</button>
+            <button id="fullBtn" class="icon-btn" aria-label="Pantalla completa" title="Pantalla completa (F)">⛶</button>
+          </div>
           <button id="closePlayer" class="icon-btn" aria-label="Cerrar">✕</button>
         </div>
       </section>

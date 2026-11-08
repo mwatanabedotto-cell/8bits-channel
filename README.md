@@ -42,6 +42,14 @@ Share Tech Mono y VT323. Las animaciones se desactivan si el sistema pide
   (bloqueados en páginas https), DASH o que necesitan cabeceras especiales.
   Desactívalo para verlos y abrirlos en un reproductor externo.
 - Selector de fuente cuando un canal tiene varias, logos y calidad.
+- **Zapping como en una TV**: cada canal tiene número fijo (001, 002…).
+  - Mando / teclado: **CH+ / CH−** (o Re Pág / Av Pág), flechas **▲ ▼** en
+    pantalla completa o con el foco en el vídeo, **números** para ir a un canal,
+    **i** / OK para ver el rótulo, **F** para pantalla completa.
+  - Móvil: botones **CH▲ / CH▼** o deslizar arriba/abajo sobre el vídeo.
+  - Al cambiar aparece el rótulo con número, nombre y país. Si un canal no
+    tiene señal se elimina y salta solo al siguiente, en la misma dirección.
+  - La app recuerda el último canal y lo pone al abrirse.
 - Diseño adaptable a móvil.
 
 ## 📱 App Android (APK)
