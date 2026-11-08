@@ -19,9 +19,12 @@ const opt = (name, def) => {
 };
 const LIMIT = Number(opt('limit', 0));
 const CONCURRENCY = Number(opt('concurrency', 64));
-const TIMEOUT = Number(opt('timeout', 12000));
+const TIMEOUT = Number(opt('timeout', process.env.CHECK_TIMEOUT || 12000));
 const IPTV_DIR = opt('iptv-dir', '');
 const NO_CHECK = args.includes('--no-check');
+// Si funcionan menos streams que esto, algo va mal en la red del servidor:
+// se aborta para no publicar un visor vacío (se mantiene la versión anterior).
+const MIN_WORKING = Number(opt('min-working', LIMIT ? 0 : 500));
 
 const API_MIRRORS = [
   'https://iptv-org.github.io/api',
@@ -117,8 +120,11 @@ export async function checkStream(stream) {
       if (variant) {
         const vUrl = new URL(variant.trim(), res.url).href;
         const vRes = await request(vUrl, stream);
-        const vBody = vRes.ok ? await readHead(vRes, 64 * 1024) : '';
-        if (!vRes.ok) return { ok: false, reason: `variante HTTP ${vRes.status}` };
+        if (!vRes.ok) {
+          vRes.body?.cancel().catch(() => {});
+          return { ok: false, reason: `variante HTTP ${vRes.status}` };
+        }
+        const vBody = await readHead(vRes, 64 * 1024);
         if (!vBody.trimStart().startsWith('#EXTM3U')) return { ok: false, reason: 'variante inválida' };
       }
     } else if (!body.includes('#EXTINF') && !body.includes('#EXT-X-TARGETDURATION')) {
@@ -128,6 +134,18 @@ export async function checkStream(stream) {
   } catch (e) {
     return { ok: false, reason: e.name === 'TimeoutError' ? 'timeout' : e.cause?.code || e.message };
   }
+}
+
+// Los streams marcados "Geo-blocked" suelen responder 403/451 desde los
+// servidores de GitHub (EE. UU.) aunque funcionen en su país. Se conservan
+// marcados con geo: true y el navegador del usuario decide si son accesibles.
+export function applyGeoRule(stream, result) {
+  if (result.ok || !stream.labels?.includes('Geo-blocked')) return result;
+  if (/^(variante )?HTTP (401|403|451)$/.test(result.reason || '')) return { ok: true, cors: true, geo: true };
+  return result;
+}
+async function checkWithGeo(stream) {
+  return applyGeoRule(stream, await checkStream(stream));
 }
 
 async function runPool(items, worker, concurrency) {
@@ -180,7 +198,7 @@ async function main() {
   console.log(`Verificando ${candidates.length} streams (concurrencia ${CONCURRENCY}, timeout ${TIMEOUT}ms)…`);
   const checks = NO_CHECK
     ? candidates.map(() => ({ ok: true, cors: true }))
-    : await runPool(candidates, checkStream, CONCURRENCY);
+    : await runPool(candidates, checkWithGeo, CONCURRENCY);
 
   const reasons = {};
   const out = new Map(); // key -> canal
@@ -206,6 +224,7 @@ async function main() {
       out.set(key, entry);
     }
     const st = { url: s.url, cors: r.cors };
+    if (r.geo) st.geo = true;
     if (s.title && s.title !== entry.name) st.title = s.title;
     if (s.quality) st.quality = s.quality;
     if (s.labels?.length) st.labels = s.labels;
@@ -232,6 +251,7 @@ async function main() {
     updated: new Date().toISOString(),
     checked: candidates.length,
     working: checks.filter((r) => r.ok).length,
+    geo_kept: checks.filter((r) => r.geo).length,
     removed: Object.fromEntries(Object.entries(reasons).sort((a, b) => b[1] - a[1]).slice(0, 15)),
     countries: [
       ...countries.filter((c) => usedCountries.has(c.code)).map(({ code, name, flag }) => ({ code, name, flag })),
@@ -242,6 +262,12 @@ async function main() {
       ...(usedCats.has('undefined') ? [{ id: 'undefined', name: 'Sin categoría' }] : []),
     ],
   };
+
+  if (meta.working < MIN_WORKING) {
+    console.error(`Solo ${meta.working} streams funcionan (mínimo ${MIN_WORKING}). Abortando sin publicar.`);
+    console.error('Motivos:', meta.removed);
+    process.exit(1);
+  }
 
   await mkdir(OUT_DIR, { recursive: true });
   await writeFile(path.join(OUT_DIR, 'channels.json'), JSON.stringify({ meta, channels: result }));
@@ -255,15 +281,16 @@ async function main() {
 function toM3u(channels, meta) {
   const country = new Map(meta.countries.map((c) => [c.code, c.name]));
   const cat = new Map(meta.categories.map((c) => [c.id, c.name]));
+  const q = (v) => String(v).replace(/"/g, "'");
   const lines = ['#EXTM3U'];
   for (const c of channels) {
     for (const s of c.streams) {
       const group = `${country.get(c.country) || c.country};${cat.get(c.categories[0]) || c.categories[0]}`;
-      const logo = c.logo ? ` tvg-logo="${c.logo}"` : '';
-      const ua = s.user_agent ? ` http-user-agent="${s.user_agent}"` : '';
-      const ref = s.referrer ? ` http-referrer="${s.referrer}"` : '';
-      const q = s.quality ? ` (${s.quality})` : '';
-      lines.push(`#EXTINF:-1 tvg-id="${c.id}" tvg-country="${c.country}"${logo}${ua}${ref} group-title="${group}",${c.name}${q}`);
+      const logo = c.logo ? ` tvg-logo="${q(c.logo)}"` : '';
+      const ua = s.user_agent ? ` http-user-agent="${q(s.user_agent)}"` : '';
+      const ref = s.referrer ? ` http-referrer="${q(s.referrer)}"` : '';
+      const quality = s.quality ? ` (${s.quality})` : '';
+      lines.push(`#EXTINF:-1 tvg-id="${q(c.id)}" tvg-country="${c.country}"${logo}${ua}${ref} group-title="${q(group)}",${c.name.replace(/[\r\n]/g, ' ')}${quality}`);
       if (s.referrer) lines.push(`#EXTVLCOPT:http-referrer=${s.referrer}`);
       if (s.user_agent) lines.push(`#EXTVLCOPT:http-user-agent=${s.user_agent}`);
       lines.push(s.url);

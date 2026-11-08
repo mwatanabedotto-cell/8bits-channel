@@ -4,11 +4,21 @@
   "private": true,
   "description": "Visor IPTV de los canales de iptv-org ordenados por país y enfoque, solo con streams accesibles",
   "type": "module",
-  "engines": { "node": ">=20" },
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "build": "node scripts/build.mjs",
     "build:quick": "node scripts/build.mjs --no-check",
     "serve": "python3 -m http.server 8080 --directory public",
-    "test": "node --test test/*.test.mjs"
+    "test": "CHECK_TIMEOUT=1500 node --test test/*.test.mjs"
+  },
+  "devDependencies": {
+    "@capacitor/android": "^8.6.0",
+    "@capacitor/cli": "^8.6.0",
+    "@capacitor/core": "^8.6.0"
+  },
+  "dependencies": {
+    "@capacitor/app": "^8.1.2"
   }
 }

@@ -2,7 +2,7 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
-import { checkStream } from '../scripts/build.mjs';
+import { checkStream, applyGeoRule } from '../scripts/build.mjs';
 
 let server;
 let base;
@@ -45,4 +45,15 @@ test('sin CORS se marca', async () => assert.deepEqual(await check('/nocors.m3u8
 test('envía referrer', async () => {
   assert.equal((await check('/needs-ref.m3u8')).ok, false);
   assert.equal((await check('/needs-ref.m3u8', { referrer: 'https://ref.example/' })).ok, true);
+});
+
+test('geo-bloqueado con 403 se conserva; sin etiqueta se elimina', () => {
+  const fail403 = { ok: false, reason: 'HTTP 403' };
+  assert.equal(applyGeoRule({ labels: ['Geo-blocked'] }, fail403).ok, true);
+  assert.equal(applyGeoRule({ labels: [] }, fail403).ok, false);
+  assert.equal(applyGeoRule({ labels: ['Geo-blocked'] }, { ok: false, reason: 'ENOTFOUND' }).ok, false);
+});
+test('timeout', async () => {
+  const r = await checkStream({ url: base + '/slow.m3u8' });
+  assert.deepEqual(r, { ok: false, reason: 'timeout' });
 });

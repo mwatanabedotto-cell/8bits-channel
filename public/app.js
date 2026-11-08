@@ -4,9 +4,15 @@
 
 const BROKEN_KEY = 'iptv.broken.v1';
 const PREFS_KEY = 'iptv.prefs.v1';
+const LAST_KEY = 'iptv.last.v1';
 const BROKEN_TTL = 3 * 24 * 3600 * 1000; // se reintenta a los 3 días
 const PLAY_TIMEOUT = 20000;
 const PAGE = 240;
+// Dentro de la APK (Capacitor) los datos se descargan de la web publicada,
+// que se actualiza a diario; la copia incluida en la APK es el respaldo.
+const IS_APP = !!window.Capacitor?.isNativePlatform?.();
+const SITE_URL = 'https://mwatanabedotto-cell.github.io/8bits-channel/';
+const DATA_URLS = IS_APP ? [SITE_URL + 'data/channels.json', 'data/channels.json'] : ['data/channels.json'];
 
 const $ = (s) => document.querySelector(s);
 const store = {
@@ -24,6 +30,8 @@ const state = {
   cats: new Set(),
   group: 'country',
   browserOnly: true,
+  lineup: [],
+  byNum: new Map(),
   ...restorePrefs(),
 };
 let renderQueue = [];
@@ -108,9 +116,14 @@ function renderSidebar() {
     ...countries.map((c) => {
       const li = document.createElement('li');
       li.className = c.code === state.country ? 'active' : '';
-      li.innerHTML = `<span>${c.flag}</span><span class="name"></span><small>${cCount.get(c.code) || 0}</small>`;
-      li.querySelector('.name').textContent = c.name;
+      li.innerHTML = '<span></span><span class="name"></span><small></small>';
+      const [flag, nm, count] = li.children;
+      flag.textContent = c.flag;
+      nm.textContent = c.name;
+      count.textContent = cCount.get(c.code) || 0;
       li.onclick = () => { state.country = state.country === c.code ? null : c.code; update(); closeMenu(); };
+      li.tabIndex = 0; // navegable con teclado / mando de TV
+      li.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); li.onclick(); } };
       return li;
     }),
   );
@@ -176,16 +189,20 @@ function renderList() {
   renderQueue = [];
   currentGrid = null;
   if (!list.length) {
-    root.innerHTML = '<p class="empty">No hay canales con estos filtros.</p>';
+    root.innerHTML = '<p class="empty"><b>SIN SEÑAL</b>No hay canales con estos filtros.</p>';
+    state.lineup = [];
     return;
   }
+  const lineup = new Set();
   for (const g of buildGroups(list)) {
     renderQueue.push({ type: 'group', title: g.title, count: g.count });
+    for (const sg of g.subs) for (const ch of sg.channels) lineup.add(ch);
     for (const s of g.subs) {
       renderQueue.push({ type: 'sub', title: s.title, count: s.channels.length });
       for (const ch of s.channels) renderQueue.push({ type: 'card', ch });
     }
   }
+  state.lineup = [...lineup]; // orden de zapping = orden en pantalla
   renderMore();
 }
 
@@ -230,6 +247,10 @@ function card(ch) {
     img.onerror = () => { logo.textContent = '📺'; };
     logo.append(img);
   } else logo.textContent = '📺';
+  const num = document.createElement('span');
+  num.className = 'chnum';
+  num.textContent = fmtNum(ch._num);
+  logo.append(num);
   const name = document.createElement('div');
   name.className = 'name';
   name.textContent = ch.name;
@@ -237,8 +258,9 @@ function card(ch) {
   const meta = document.createElement('div');
   meta.className = 'meta';
   const q = ch._usable.map((s) => s.quality).filter(Boolean)[0];
-  meta.innerHTML = (q ? `<span class="badge">${q}</span>` : '') +
-    (ch._usable.some((s) => s.labels?.includes('Geo-blocked')) ? '<span class="badge">geo</span>' : '');
+  const badge = (t) => { const e = document.createElement('span'); e.className = 'badge'; e.textContent = t; meta.append(e); };
+  if (q) badge(q);
+  if (ch._usable.some((s) => s.geo || s.labels?.includes('Geo-blocked'))) badge('geo');
   meta.append(`${countryFlag(ch.country)} ${ch.categories.map(catName).join(', ')}`);
   b.append(logo, name, meta);
   b.onclick = () => play(ch);
@@ -257,15 +279,21 @@ function stopPlayback() {
   if (!playing) return;
   clearTimeout(playing.timer);
   playing.hls?.destroy();
+  playing.hls = null;
   const v = $('#video');
+  v.onplaying = v.onloadeddata = v.onerror = null;
   v.removeAttribute('src');
   v.load();
 }
 
-function play(ch, index = 0) {
+const fmtNum = (n) => String(n).padStart(3, '0');
+
+function play(ch, index = 0, { dir = 0, skips = 0 } = {}) {
   stopPlayback();
   const streams = ch._usable.slice();
-  playing = { channel: ch, streams, index };
+  playing = { channel: ch, streams, index, dir, skips };
+  store.set(LAST_KEY, ch.id);
+  showOsd(ch);
   document.querySelectorAll('.card.playing').forEach((c) => c.classList.remove('playing'));
   document.querySelector(`.card[data-id="${CSS.escape(ch.id)}"]`)?.classList.add('playing');
 
@@ -280,7 +308,7 @@ function play(ch, index = 0) {
     `Fuente ${i + 1}${s.quality ? ` · ${s.quality}` : ''}${browserPlayable(s) ? '' : ' (externa)'}`, i)));
   sel.value = index;
   sel.hidden = streams.length < 2;
-  $('main').scrollTo({ top: 0, behavior: 'smooth' });
+  if (!document.fullscreenElement) $('main').scrollTo({ top: 0, behavior: 'smooth' });
   startStream();
 }
 
@@ -294,24 +322,32 @@ function startStream() {
   const p = playing;
   const s = p.streams[p.index];
   const video = $('#video');
+  video.onplaying = video.onloadeddata = video.onerror = null;
   if (!browserPlayable(s)) {
     showMsg(`Esta fuente no se puede reproducir en el navegador.<br>
-      Ábrela en VLC: <a href="${s.url}" target="_blank" rel="noopener">copiar enlace</a>`);
+      Ábrela en VLC: <a href="${escapeHtml(s.url)}" target="_blank" rel="noopener noreferrer">enlace del stream</a>`);
     return;
   }
-  showMsg('Cargando…');
+  showMsg('<span class="tuning">SINTONIZANDO SEÑAL</span>');
+  // El stream se considera accesible en cuanto llega vídeo, aunque el navegador
+  // bloquee la reproducción automática (eso no es culpa del canal).
   const ok = () => { clearTimeout(p.timer); if (playing === p) showMsg(''); };
-  const fail = (why) => { if (playing === p) onStreamFail(p, why); };
+  const fail = (why) => { if (playing === p && !p.failed) { p.failed = true; onStreamFail(p, why); } };
+  const tryPlay = () => video.play().catch(() => {
+    video.muted = true; // autoplay con sonido bloqueado: reintentar en silencio
+    video.play().catch(() => { if (playing === p) showMsg('Pulsa ▶ para reproducir'); });
+  });
+  p.failed = false;
   p.timer = setTimeout(() => fail('tiempo de espera agotado'), PLAY_TIMEOUT);
   video.onplaying = ok;
-  video.onerror = () => fail('error del reproductor');
+  video.onloadeddata = ok;
 
   if (window.Hls?.isSupported()) {
     const hls = new Hls({ manifestLoadingMaxRetry: 1, levelLoadingMaxRetry: 1, fragLoadingMaxRetry: 2 });
     p.hls = hls;
     let recovered = false;
     hls.on(Hls.Events.ERROR, (_, d) => {
-      if (!d.fatal) return;
+      if (!d.fatal || playing !== p || p.hls !== hls) return;
       if (d.type === Hls.ErrorTypes.MEDIA_ERROR && !recovered) {
         recovered = true;
         hls.recoverMediaError();
@@ -319,12 +355,16 @@ function startStream() {
       }
       fail(d.details);
     });
+    hls.on(Hls.Events.FRAG_BUFFERED, ok);
+    hls.on(Hls.Events.MANIFEST_PARSED, tryPlay);
     hls.loadSource(s.url);
     hls.attachMedia(video);
-    hls.on(Hls.Events.MANIFEST_PARSED, () => video.play().catch(() => showMsg('Pulsa ▶ para reproducir')));
   } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-    video.src = s.url; // HLS nativo (Safari / iOS)
-    video.play().catch(() => {});
+    // HLS nativo (Safari / iOS). onerror solo aquí: con hls.js los errores
+    // del elemento <video> se gestionan por Hls.Events.ERROR.
+    video.onerror = () => fail('error del reproductor');
+    video.src = s.url;
+    tryPlay();
   } else {
     // Sin soporte HLS: no es culpa del canal, así que no se elimina.
     clearTimeout(p.timer);
@@ -353,10 +393,102 @@ function onStreamFail(p, why) {
   }
   // Ninguna fuente funciona: el canal se elimina de la lista.
   refreshUsable();
-  showMsg(`<b>${escapeHtml(p.channel.name)}</b> no está accesible y se ha eliminado de la lista.`);
-  toast(`Eliminado: ${p.channel.name} (no accesible)`);
+  showMsg(`<b class="nosignal">SIN SEÑAL</b><br>${escapeHtml(p.channel.name)} no está accesible y se ha eliminado de la lista.`);
+  toast(`✕ ELIMINADO · ${p.channel.name} (no accesible)`);
   document.querySelector(`.card[data-id="${CSS.escape(p.channel.id)}"]`)?.remove();
+  const removedIdx = state.lineup.indexOf(p.channel);
+  state.lineup = state.lineup.filter((c) => c._usable.length);
   renderSidebar();
+  // Haciendo zapping, como en una TV: se salta solo al siguiente canal.
+  if (p.dir && p.skips < 15 && state.lineup.length) {
+    setTimeout(() => {
+      if (playing !== p) return;
+      const i = p.dir > 0 ? removedIdx : removedIdx - 1;
+      const next = state.lineup[(i + state.lineup.length) % state.lineup.length];
+      play(next, 0, { dir: p.dir, skips: p.skips + 1 });
+    }, 1200);
+  }
+}
+
+// ---------- Zapping estilo TV ----------
+function zap(delta) {
+  const list = state.lineup;
+  if (!list.length) return;
+  let i = playing ? list.indexOf(playing.channel) : -1;
+  if (i === -1) i = delta > 0 ? -1 : 0;
+  const next = list[(i + delta + list.length) % list.length];
+  play(next, 0, { dir: delta });
+}
+
+let osdTimer;
+function showOsd(ch, typed) {
+  const osd = $('#osd');
+  osd.querySelector('.osd-num').textContent = typed ?? fmtNum(ch._num);
+  osd.querySelector('.osd-name').textContent = typed ? '' : ch.name;
+  osd.querySelector('.osd-meta').textContent = typed
+    ? 'Introduce el número de canal'
+    : `${countryFlag(ch.country)} ${countryName(ch.country)} · ${ch.categories.map(catName).join(', ')}`;
+  osd.hidden = false;
+  clearTimeout(osdTimer);
+  osdTimer = setTimeout(() => { osd.hidden = true; }, typed ? 2500 : 3500);
+}
+
+// Teclear el número de canal con el mando o el teclado (como en la TV)
+let numBuf = '';
+let numTimer;
+function typeDigit(d) {
+  numBuf = (numBuf + d).slice(-4);
+  $('#player').hidden = false;
+  showOsd(null, numBuf.padEnd(3, '_'));
+  clearTimeout(numTimer);
+  numTimer = setTimeout(() => {
+    const n = Number(numBuf);
+    numBuf = '';
+    const ch = state.byNum.get(n);
+    if (ch && ch._usable.length) play(ch);
+    else { toast(`CANAL ${fmtNum(n)} NO DISPONIBLE`); if (playing) showOsd(playing.channel); else $('#player').hidden = true; }
+  }, 1500);
+}
+
+function toggleFullscreen() {
+  const wrap = $('.video-wrap');
+  if (document.fullscreenElement) document.exitFullscreen();
+  else wrap.requestFullscreen?.().catch(() => {});
+}
+
+function onKey(e) {
+  const t = e.target;
+  const typing = t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA';
+  if (typing) return;
+  const full = !!document.fullscreenElement;
+  const videoFocused = t.closest?.('.video-wrap') || t === document.body;
+  const k = e.key;
+  const code = e.keyCode;
+  // Teclas de canal del mando (KEYCODE_CHANNEL_UP/DOWN = 166/167) y Re Pág / Av Pág
+  const chUp = k === 'ChannelUp' || k === 'PageUp' || code === 166;
+  const chDown = k === 'ChannelDown' || k === 'PageDown' || code === 167;
+  // Flechas ▲▼: cambian canal en pantalla completa o con el foco en el vídeo
+  const arrowZap = playing && (full || (videoFocused && !$('#sidebar').classList.contains('open')));
+  if (chUp || (arrowZap && k === 'ArrowUp')) { e.preventDefault(); zap(+1); return; }
+  if (chDown || (arrowZap && k === 'ArrowDown')) { e.preventDefault(); zap(-1); return; }
+  if (/^[0-9]$/.test(k)) { e.preventDefault(); typeDigit(k); return; }
+  if (playing && (k === 'i' || k === 'Info' || (full && k === 'Enter'))) { e.preventDefault(); showOsd(playing.channel); return; }
+  if (playing && (k === 'f' || k === 'F')) { e.preventDefault(); toggleFullscreen(); }
+}
+
+// Deslizar arriba/abajo sobre el vídeo cambia de canal (móvil)
+function setupSwipe() {
+  const wrap = $('.video-wrap');
+  let y0 = null;
+  let x0 = null;
+  wrap.addEventListener('touchstart', (e) => { y0 = e.touches[0].clientY; x0 = e.touches[0].clientX; }, { passive: true });
+  wrap.addEventListener('touchend', (e) => {
+    if (y0 === null) return;
+    const dy = e.changedTouches[0].clientY - y0;
+    const dx = e.changedTouches[0].clientX - x0;
+    y0 = null;
+    if (Math.abs(dy) > 70 && Math.abs(dy) > Math.abs(dx) * 1.5) zap(dy < 0 ? +1 : -1);
+  }, { passive: true });
 }
 
 function escapeHtml(s) {
@@ -374,18 +506,50 @@ function toast(text) {
 
 function closeMenu() { $('#sidebar').classList.remove('open'); }
 
+function closePlayer() {
+  if (document.fullscreenElement) document.exitFullscreen();
+  stopPlayback();
+  playing = null;
+  $('#player').hidden = true;
+  document.querySelectorAll('.card.playing').forEach((c) => c.classList.remove('playing'));
+}
+
+// Ajustes propios de la APK de Android
+function setupApp() {
+  document.documentElement.classList.add('is-app');
+  document.querySelector('.toggle').lastChild.textContent = ' Solo canales reproducibles en la app';
+  const m3u = document.querySelector('a[href="data/playlist.m3u"]');
+  if (m3u) { m3u.href = SITE_URL + 'data/playlist.m3u'; m3u.removeAttribute('download'); m3u.target = '_blank'; }
+  // Botón «atrás»: cierra pantalla completa, menú o reproductor antes de salir.
+  window.Capacitor.Plugins?.App?.addListener('backButton', () => {
+    if (document.fullscreenElement) document.exitFullscreen();
+    else if ($('#sidebar').classList.contains('open')) closeMenu();
+    else if (playing) closePlayer();
+    else window.Capacitor.Plugins.App.exitApp();
+  });
+}
+
 // ---------- Inicio ----------
 async function init() {
-  $('#list').innerHTML = '<p class="empty">Cargando canales…</p>';
+  $('#list').innerHTML = '<p class="empty"><b class="tuning">CARGANDO</b>Recibiendo la lista de canales…</p>';
   let data;
-  try {
-    const res = await fetch('data/channels.json', { cache: 'no-cache' });
-    if (!res.ok) throw new Error(res.status);
-    data = await res.json();
-  } catch (e) {
-    $('#list').innerHTML = '<p class="empty">No se pudo cargar data/channels.json. Ejecuta <code>npm run build</code>.</p>';
+  for (const url of DATA_URLS) {
+    try {
+      const res = await fetch(url, { cache: 'no-cache' });
+      if (!res.ok) throw new Error(res.status);
+      data = await res.json();
+      break;
+    } catch (e) {
+      console.warn('No se pudo cargar', url, e);
+    }
+  }
+  if (!data) {
+    $('#list').innerHTML = IS_APP
+      ? '<p class="empty"><b>SIN SEÑAL</b>No se pudo descargar la lista de canales. Revisa tu conexión a Internet.</p>'
+      : '<p class="empty"><b>SIN SEÑAL</b>No se pudo cargar data/channels.json. Ejecuta <code>npm run build</code>.</p>';
     return;
   }
+  if (IS_APP) setupApp();
   state.countries = new Map(data.meta.countries.map((c) => [c.code, { ...c, name: localCountryName(c.code, c.name) }]));
   state.categories = new Map(data.meta.categories.map((c) => [c.id, { ...c, name: CAT_ES[c.id] || c.name }]));
   state.updated = new Date(data.meta.updated).toLocaleDateString('es', { day: 'numeric', month: 'short', year: 'numeric' });
@@ -394,6 +558,13 @@ async function init() {
     _search: `${ch.name} ${ch.streams.map((s) => s.title || '').join(' ')}`.toLowerCase(),
   }));
   if (state.country && !state.countries.has(state.country)) state.country = null;
+  // Números de canal fijos (por país, enfoque y nombre), como en una TV.
+  const order = state.channels.slice().sort((a, b) =>
+    countryName(a.country).localeCompare(countryName(b.country), 'es') ||
+    catName(a.categories[0]).localeCompare(catName(b.categories[0]), 'es') ||
+    a.name.localeCompare(b.name, 'es'));
+  state.byNum = new Map();
+  order.forEach((ch, i) => { ch._num = i + 1; state.byNum.set(i + 1, ch); });
   refreshUsable();
 
   $('#browserOnly').checked = state.browserOnly;
@@ -413,8 +584,14 @@ async function init() {
   $('#clearCountry').onclick = () => { state.country = null; update(); };
   $('#resetBroken').onclick = () => { state.broken.clear(); saveBroken(); refreshUsable(); update(); };
   $('#streamSelect').onchange = (e) => { stopPlayback(); playing.index = Number(e.target.value); startStream(); };
-  $('#closePlayer').onclick = () => { stopPlayback(); playing = null; $('#player').hidden = true;
-    document.querySelectorAll('.card.playing').forEach((c) => c.classList.remove('playing')); };
+  $('#closePlayer').onclick = closePlayer;
+  $('#chUp').onclick = $('#zapUp').onclick = () => zap(+1);
+  $('#chDown').onclick = $('#zapDown').onclick = () => zap(-1);
+  $('#fullBtn').onclick = toggleFullscreen;
+  $('.video-wrap').tabIndex = 0;
+  $('.video-wrap').ondblclick = toggleFullscreen;
+  document.addEventListener('keydown', onKey);
+  setupSwipe();
   $('#menuBtn').onclick = () => $('#sidebar').classList.toggle('open');
 
   new IntersectionObserver((entries) => {
@@ -422,6 +599,10 @@ async function init() {
   }, { root: $('main'), rootMargin: '800px' }).observe($('#sentinel'));
 
   update();
+
+  // En la app (TV / móvil) se continúa con el último canal visto, como una TV.
+  const last = IS_APP && state.channels.find((c) => c.id === store.get(LAST_KEY, null));
+  if (last && last._usable.length) play(last);
 }
 
 init();

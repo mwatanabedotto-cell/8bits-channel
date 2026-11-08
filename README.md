@@ -4,6 +4,13 @@ Visor web de los canales públicos de [iptv-org/iptv](https://github.com/iptv-or
 **ordenados por país y por enfoque (categoría)**, que **elimina automáticamente los
 canales no accesibles**.
 
+![Visor en escritorio](docs/captura-escritorio.png)
+
+Estética retrofuturista (synthwave / monitor CRT): neón magenta y cian, sol
+de líneas y rejilla en perspectiva, líneas de escaneo y tipografías Orbitron,
+Share Tech Mono y VT323. Las animaciones se desactivan si el sistema pide
+«reducir movimiento».
+
 ## Cómo funciona
 
 1. **Verificación en el servidor** (`scripts/build.mjs`): descarga los datos de la
@@ -35,7 +42,46 @@ canales no accesibles**.
   (bloqueados en páginas https), DASH o que necesitan cabeceras especiales.
   Desactívalo para verlos y abrirlos en un reproductor externo.
 - Selector de fuente cuando un canal tiene varias, logos y calidad.
+- **Zapping como en una TV**: cada canal tiene número fijo (001, 002…).
+  - Mando / teclado: **CH+ / CH−** (o Re Pág / Av Pág), flechas **▲ ▼** en
+    pantalla completa o con el foco en el vídeo, **números** para ir a un canal,
+    **i** / OK para ver el rótulo, **F** para pantalla completa.
+  - Móvil: botones **CH▲ / CH▼** o deslizar arriba/abajo sobre el vídeo.
+  - Al cambiar aparece el rótulo con número, nombre y país. Si un canal no
+    tiene señal se elimina y salta solo al siguiente, en la misma dirección.
+  - La app recuerda el último canal y lo pone al abrirse.
 - Diseño adaptable a móvil.
+
+## 📱 App Android (APK)
+
+El mismo visor empaquetado como app nativa con [Capacitor](https://capacitorjs.com/)
+(carpeta `android/`). Funciona en móviles, tablets y **Android TV / TV Box**
+(se maneja con el mando y aparece en el lanzador de la TV).
+
+**Descargar:** [última APK](../../releases/latest/download/8bits-channel.apk)
+(o en *Releases*). Ábrela en el Android y permite «instalar apps desconocidas».
+
+Diferencias con la web:
+- La lista de canales se descarga de la web publicada (actualizada cada día);
+  la APK lleva una copia de respaldo.
+- Reproduce también streams `http://` (en la web los bloquea el navegador).
+- El botón «atrás» cierra el menú o el reproductor antes de salir.
+
+El workflow `.github/workflows/android.yml` compila la APK en cada cambio y,
+en `main`, la publica en *Releases*.
+
+Firma: sin configurar nada, la APK se firma con una clave de depuración
+(funciona, pero al actualizar puede pedir desinstalar la anterior). Para una
+firma fija, crea una clave y guárdala en *Settings → Secrets and variables →
+Actions* como `ANDROID_KEYSTORE_BASE64` (el archivo .keystore en base64),
+`ANDROID_KEYSTORE_PASSWORD` y `ANDROID_KEY_ALIAS`. Nunca subas la clave al
+repositorio.
+
+Compilar en local (requiere Android SDK y JDK 21):
+
+```bash
+npm ci && npx cap sync android && (cd android && ./gradlew assembleRelease)
+```
 
 ## Publicarlo en GitHub Pages
 
@@ -56,7 +102,8 @@ npm test
 
 Opciones de `scripts/build.mjs`: `--limit N`, `--concurrency N`, `--timeout MS`,
 `--iptv-dir RUTA` (clon de iptv-org/iptv para asignar país a streams sin canal),
-`--no-check`.
+`--no-check`, `--min-working N` (aborta si funcionan menos de N streams, por defecto 500,
+para no publicar un visor vacío si falla la red).
 
 ## Aviso
 

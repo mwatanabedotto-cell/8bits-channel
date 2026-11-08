@@ -1,0 +1,96 @@
+name: APK Android
+
+on:
+  push:
+    paths:
+      - 'public/**'
+      - 'android/**'
+      - 'assets/**'
+      - 'capacitor.config.json'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/android.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: gradle
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Copia de respaldo de la lista de canales (verificada)
+        run: |
+          mkdir -p public/data
+          curl -fsSL https://mwatanabedotto-cell.github.io/8bits-channel/data/channels.json -o public/data/channels.json \
+            || echo "La web aún no está publicada: la app descargará la lista al abrirse."
+
+      - name: Copiar el visor al proyecto Android
+        run: npx cap sync android
+
+      # Conserva la clave de depuración entre compilaciones (si no hay secrets),
+      # para que las actualizaciones se instalen encima mientras exista la caché.
+      - uses: actions/cache@v4
+        with:
+          path: ~/.android/debug.keystore
+          key: android-debug-keystore-v1
+
+      - name: Clave de firma (opcional, desde secrets)
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.keystore"
+            echo "ANDROID_KEYSTORE_FILE=$RUNNER_TEMP/release.keystore" >> "$GITHUB_ENV"
+          else
+            echo "::notice::Sin secret ANDROID_KEYSTORE_BASE64: se firma con clave de depuración."
+          fi
+
+      - name: Compilar APK
+        working-directory: android
+        env:
+          VERSION_CODE: ${{ github.run_number }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleRelease --no-daemon --stacktrace
+          cp app/build/outputs/apk/release/app-release.apk ../8bits-channel.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: 8bits-channel-apk
+          path: 8bits-channel.apk
+
+      - name: Publicar en Releases
+        if: github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: apk-v1.0.${{ github.run_number }}
+          name: 8bits Channel 1.0.${{ github.run_number }} (Android)
+          make_latest: true
+          files: 8bits-channel.apk
+          body: |
+            📺 **Descarga:** `8bits-channel.apk` (abajo, en *Assets*).
+
+            Instalación: abre el archivo en tu Android y permite «instalar apps desconocidas»
+            cuando lo pida. Funciona en móviles, tablets y Android TV / TV Box (Android 7+).
+            Si al actualizar Android dice que el paquete está en conflicto,
+            desinstala la versión anterior e instala esta.
