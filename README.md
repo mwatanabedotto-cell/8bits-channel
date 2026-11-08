@@ -6,8 +6,8 @@ canales no accesibles**.
 
 ![Visor en escritorio](docs/captura-escritorio.png)
 
-Estética retrofuturista (synthwave / monitor CRT): neón magenta y cian, sol
-de líneas y rejilla en perspectiva, líneas de escaneo y tipografías Orbitron,
+Estética retrofuturista (synthwave): neón magenta y cian, sol de líneas y
+rejilla en perspectiva (estáticos, ligeros para TV Box) y tipografías Orbitron,
 Share Tech Mono y VT323. Las animaciones se desactivan si el sistema pide
 «reducir movimiento».
 
@@ -49,7 +49,12 @@ Share Tech Mono y VT323. Las animaciones se desactivan si el sistema pide
   - Móvil: botones **CH▲ / CH▼** o deslizar arriba/abajo sobre el vídeo.
   - Al cambiar aparece el rótulo con número, nombre y país. Si un canal no
     tiene señal se elimina y salta solo al siguiente, en la misma dirección.
-  - La app recuerda el último canal y lo pone al abrirse.
+  - Al abrir (web y app) se pone el último canal visto.
+- **Favoritos**: botón ☆ en el reproductor (o tecla `*` del mando). Salen
+  arriba en «★ Favoritos» y con «Solo mis favoritos» el zapping va solo por ellos.
+- Sonido: en la app la TV reproduce con sonido sin tocar la pantalla. Si un
+  navegador bloquea el sonido automático, aparece «🔇 Activar sonido» y se
+  activa con cualquier tecla o toque.
 - Diseño adaptable a móvil.
 
 ## 📱 App Android (APK)
