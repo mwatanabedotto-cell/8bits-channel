@@ -5,9 +5,10 @@
 const BROKEN_KEY = 'iptv.broken.v1';
 const PREFS_KEY = 'iptv.prefs.v1';
 const LAST_KEY = 'iptv.last.v1';
+const FAVS_KEY = 'iptv.favs.v1';
 const BROKEN_TTL = 3 * 24 * 3600 * 1000; // se reintenta a los 3 días
 const PLAY_TIMEOUT = 20000;
-const PAGE = 240;
+const PAGE = window.Capacitor?.isNativePlatform?.() ? 96 : 200; // menos tarjetas por tanda en TV/móvil
 // Dentro de la APK (Capacitor) los datos se descargan de la web publicada,
 // que se actualiza a diario; la copia incluida en la APK es el respaldo.
 const IS_APP = !!window.Capacitor?.isNativePlatform?.();
@@ -45,10 +46,12 @@ function restorePrefs() {
     cats: new Set(p.cats || []),
     group: p.group === 'category' ? 'category' : 'country',
     browserOnly: p.browserOnly ?? true,
+    favOnly: !!p.favOnly,
+    favs: new Set(store.get(FAVS_KEY, [])),
   };
 }
 function savePrefs() {
-  store.set(PREFS_KEY, { country: state.country, cats: [...state.cats], group: state.group, browserOnly: state.browserOnly });
+  store.set(PREFS_KEY, { country: state.country, cats: [...state.cats], group: state.group, browserOnly: state.browserOnly, favOnly: state.favOnly });
 }
 function loadBroken() {
   const now = Date.now();
@@ -70,6 +73,7 @@ function usableStreams(ch) {
 }
 function matches(ch, { country = true, cats = true } = {}) {
   if (!ch._usable.length) return false;
+  if (state.favOnly && !state.favs.has(ch.id)) return false;
   if (state.q && !ch._search.includes(state.q)) return false;
   if (country && state.country && ch.country !== state.country) return false;
   if (cats && state.cats.size && !ch.categories.some((c) => state.cats.has(c))) return false;
@@ -169,7 +173,7 @@ function buildGroups(list) {
   const subLabel = state.group === 'country' ? catName : (k) => `${countryFlag(k)} ${countryName(k)}`;
   const sortKey = state.group === 'country' ? countryName : catName;
   const subSortKey = state.group === 'country' ? catName : countryName;
-  return [...groups.entries()]
+  const result = [...groups.entries()]
     .sort((a, b) => sortKey(a[0]).localeCompare(sortKey(b[0]), 'es'))
     .map(([k, subs]) => ({
       title: label(k),
@@ -178,6 +182,33 @@ function buildGroups(list) {
         .sort((a, b) => subSortKey(a[0]).localeCompare(subSortKey(b[0]), 'es'))
         .map(([s, chs]) => ({ title: subLabel(s), channels: chs })),
     }));
+  // ★ Favoritos siempre arriba (y primeros al hacer zapping)
+  const favs = list.filter((ch) => state.favs.has(ch.id)).sort((a, b) => a._num - b._num);
+  if (favs.length && !state.favOnly) {
+    result.unshift({ title: '★ Favoritos', count: favs.length, subs: [{ title: 'Mis canales', channels: favs }] });
+  }
+  if (state.favOnly) return [{ title: '★ Favoritos', count: favs.length, subs: [{ title: 'Mis canales', channels: favs }] }];
+  return result;
+}
+
+// ---------- Favoritos ----------
+function toggleFav(ch) {
+  if (state.favs.has(ch.id)) state.favs.delete(ch.id);
+  else state.favs.add(ch.id);
+  store.set(FAVS_KEY, [...state.favs]);
+  const fav = state.favs.has(ch.id);
+  toast(fav ? `★ AÑADIDO A FAVORITOS · ${ch.name}` : `☆ QUITADO DE FAVORITOS · ${ch.name}`, fav ? 'ok' : '');
+  updateFavBtn();
+  const top = $('main').scrollTop;
+  update();
+  $('main').scrollTop = top;
+}
+function updateFavBtn() {
+  const fav = playing && state.favs.has(playing.channel.id);
+  $('#favBtn').textContent = fav ? '★' : '☆';
+  $('#favBtn').classList.toggle('on', !!fav);
+  $('#favBtn').title = fav ? 'Quitar de favoritos (*)' : 'Añadir a favoritos (*)';
+  $('#favCount').textContent = state.favs.size;
 }
 
 function renderList() {
@@ -251,6 +282,12 @@ function card(ch) {
   num.className = 'chnum';
   num.textContent = fmtNum(ch._num);
   logo.append(num);
+  if (state.favs.has(ch.id)) {
+    const star = document.createElement('span');
+    star.className = 'favstar';
+    star.textContent = '★';
+    logo.append(star);
+  }
   const name = document.createElement('div');
   name.className = 'name';
   name.textContent = ch.name;
@@ -299,6 +336,7 @@ function play(ch, index = 0, { dir = 0, skips = 0 } = {}) {
 
   $('#player').hidden = false;
   $('#playerName').textContent = ch.name;
+  updateFavBtn();
   $('#playerMeta').textContent = `${countryFlag(ch.country)} ${countryName(ch.country)} · ${ch.categories.map(catName).join(', ')}`;
   $('#playerLogo').onerror = () => { $('#playerLogo').hidden = true; };
   $('#playerLogo').src = ch.logo || '';
@@ -333,17 +371,31 @@ function startStream() {
   // bloquee la reproducción automática (eso no es culpa del canal).
   const ok = () => { clearTimeout(p.timer); if (playing === p) showMsg(''); };
   const fail = (why) => { if (playing === p && !p.failed) { p.failed = true; onStreamFail(p, why); } };
-  const tryPlay = () => video.play().catch(() => {
-    video.muted = true; // autoplay con sonido bloqueado: reintentar en silencio
-    video.play().catch(() => { if (playing === p) showMsg('Pulsa ▶ para reproducir'); });
-  });
+  // Siempre se intenta con sonido. Solo si el sistema bloquea el autoplay con
+  // sonido se reproduce en silencio y se muestra «Activar sonido».
+  const tryPlay = () => {
+    if (autoMuted) { video.muted = false; autoMuted = false; }
+    video.play().then(updateSoundHint).catch(() => {
+      video.muted = true;
+      autoMuted = true;
+      updateSoundHint();
+      video.play().catch(() => { if (playing === p) showMsg('Pulsa ▶ para reproducir'); });
+    });
+  };
   p.failed = false;
   p.timer = setTimeout(() => fail('tiempo de espera agotado'), PLAY_TIMEOUT);
   video.onplaying = ok;
   video.onloadeddata = ok;
 
   if (window.Hls?.isSupported()) {
-    const hls = new Hls({ manifestLoadingMaxRetry: 1, levelLoadingMaxRetry: 1, fragLoadingMaxRetry: 2 });
+    const hls = new Hls({
+      manifestLoadingMaxRetry: 1, levelLoadingMaxRetry: 1, fragLoadingMaxRetry: 2,
+      // Más ligero para TV Box y móviles modestos
+      lowLatencyMode: false,
+      capLevelToPlayerSize: true, // no decodifica 1080p si la pantalla no lo necesita
+      maxBufferLength: 20,
+      backBufferLength: 10,
+    });
     p.hls = hls;
     let recovered = false;
     hls.on(Hls.Events.ERROR, (_, d) => {
@@ -410,6 +462,21 @@ function onStreamFail(p, why) {
   }
 }
 
+// ---------- Sonido ----------
+let autoMuted = false; // silenciado por el bloqueo de autoplay (no por el usuario)
+function updateSoundHint() {
+  $('#soundBtn').hidden = !autoMuted;
+}
+function unmute() {
+  const v = $('#video');
+  if (!autoMuted) return;
+  autoMuted = false;
+  v.muted = false;
+  if (v.volume === 0) v.volume = 1;
+  v.play().catch(() => {});
+  updateSoundHint();
+}
+
 // ---------- Zapping estilo TV ----------
 function zap(delta) {
   const list = state.lineup;
@@ -464,6 +531,7 @@ function onKey(e) {
   const videoFocused = t.closest?.('.video-wrap') || t === document.body;
   const k = e.key;
   const code = e.keyCode;
+  unmute(); // cualquier tecla del mando cuenta como interacción: activar sonido
   // Teclas de canal del mando (KEYCODE_CHANNEL_UP/DOWN = 166/167) y Re Pág / Av Pág
   const chUp = k === 'ChannelUp' || k === 'PageUp' || code === 166;
   const chDown = k === 'ChannelDown' || k === 'PageDown' || code === 167;
@@ -472,6 +540,7 @@ function onKey(e) {
   if (chUp || (arrowZap && k === 'ArrowUp')) { e.preventDefault(); zap(+1); return; }
   if (chDown || (arrowZap && k === 'ArrowDown')) { e.preventDefault(); zap(-1); return; }
   if (/^[0-9]$/.test(k)) { e.preventDefault(); typeDigit(k); return; }
+  if (playing && (k === '*' || k === 'Bookmark' || k === 'ColorF2Yellow' || code === 174)) { e.preventDefault(); toggleFav(playing.channel); return; }
   if (playing && (k === 'i' || k === 'Info' || (full && k === 'Enter'))) { e.preventDefault(); showOsd(playing.channel); return; }
   if (playing && (k === 'f' || k === 'F')) { e.preventDefault(); toggleFullscreen(); }
 }
@@ -496,9 +565,10 @@ function escapeHtml(s) {
 }
 
 let toastTimer;
-function toast(text) {
+function toast(text, kind = '') {
   const t = $('#toast');
   t.textContent = text;
+  t.className = 'toast ' + kind;
   t.hidden = false;
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => { t.hidden = true; }, 4000);
@@ -529,15 +599,40 @@ function setupApp() {
   });
 }
 
+// ---------- Caché de la lista (la app arranca al instante) ----------
+// Se usa la última lista guardada y se descarga la nueva en segundo plano
+// para el próximo arranque.
+const CACHE_NAME = '8bits-data-v1';
+async function loadCachedData() {
+  try {
+    const res = await (await caches.open(CACHE_NAME)).match(DATA_URLS[0]);
+    return res ? await res.json() : null;
+  } catch { return null; }
+}
+async function saveCachedData(res) {
+  try { await (await caches.open(CACHE_NAME)).put(DATA_URLS[0], res); } catch { /* sin Cache API */ }
+}
+function refreshDataInBackground() {
+  setTimeout(async () => {
+    try {
+      const res = await fetch(DATA_URLS[0], { cache: 'no-cache' });
+      if (res.ok) await saveCachedData(res);
+    } catch { /* sin conexión: se queda la copia */ }
+  }, 8000);
+}
+
 // ---------- Inicio ----------
 async function init() {
   $('#list').innerHTML = '<p class="empty"><b class="tuning">CARGANDO</b>Recibiendo la lista de canales…</p>';
-  let data;
-  for (const url of DATA_URLS) {
+  let data = IS_APP ? await loadCachedData() : null;
+  if (data) refreshDataInBackground();
+  for (const url of data ? [] : DATA_URLS) {
     try {
       const res = await fetch(url, { cache: 'no-cache' });
       if (!res.ok) throw new Error(res.status);
+      const clone = res.clone();
       data = await res.json();
+      if (IS_APP && url.startsWith('http')) saveCachedData(clone);
       break;
     } catch (e) {
       console.warn('No se pudo cargar', url, e);
@@ -588,6 +683,12 @@ async function init() {
   $('#chUp').onclick = $('#zapUp').onclick = () => zap(+1);
   $('#chDown').onclick = $('#zapDown').onclick = () => zap(-1);
   $('#fullBtn').onclick = toggleFullscreen;
+  $('#favBtn').onclick = () => playing && toggleFav(playing.channel);
+  $('#soundBtn').onclick = unmute;
+  document.addEventListener('pointerdown', unmute, true);
+  $('#favOnly').checked = state.favOnly;
+  $('#favOnly').onchange = (e) => { state.favOnly = e.target.checked; update(); };
+  $('#favCount').textContent = state.favs.size;
   $('.video-wrap').tabIndex = 0;
   $('.video-wrap').ondblclick = toggleFullscreen;
   document.addEventListener('keydown', onKey);
@@ -600,8 +701,9 @@ async function init() {
 
   update();
 
-  // En la app (TV / móvil) se continúa con el último canal visto, como una TV.
-  const last = IS_APP && state.channels.find((c) => c.id === store.get(LAST_KEY, null));
+  // Al abrir se continúa con el último canal visto, como una TV.
+  const lastId = store.get(LAST_KEY, null);
+  const last = lastId && state.channels.find((c) => c.id === lastId);
   if (last && last._usable.length) play(last);
 }
 

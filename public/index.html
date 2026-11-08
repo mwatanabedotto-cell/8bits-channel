@@ -14,7 +14,6 @@
 </head>
 <body>
   <div class="bg" aria-hidden="true"><div class="sun"></div><div class="floor"></div></div>
-  <div class="scanlines" aria-hidden="true"></div>
   <header class="topbar">
     <button id="menuBtn" class="icon-btn" aria-label="Filtros">☰</button>
     <h1 class="brand"><span class="brand-8">8BITS</span><span class="brand-ch">CHANNEL</span></h1>
@@ -30,6 +29,12 @@
           <label><input type="radio" name="group" value="country" checked /> País</label>
           <label><input type="radio" name="group" value="category" /> Enfoque</label>
         </div>
+      </section>
+      <section>
+        <label class="toggle fav-toggle">
+          <input id="favOnly" type="checkbox" />
+          ★ Solo mis favoritos (<span id="favCount">0</span>)
+        </label>
       </section>
       <section>
         <label class="toggle">
@@ -63,6 +68,7 @@
             <div class="osd-num"></div>
             <div class="osd-body"><div class="osd-name"></div><div class="osd-meta"></div></div>
           </div>
+          <button id="soundBtn" class="sound-btn" hidden>🔇 ACTIVAR SONIDO</button>
           <button id="zapUp" class="zap zap-up" aria-label="Canal siguiente">▲</button>
           <button id="zapDown" class="zap zap-down" aria-label="Canal anterior">▼</button>
         </div>
@@ -74,6 +80,7 @@
           </div>
           <select id="streamSelect" aria-label="Fuente"></select>
           <div class="zapbar">
+            <button id="favBtn" class="icon-btn fav-btn" aria-label="Favorito" title="Añadir a favoritos (*)">☆</button>
             <button id="chDown" class="icon-btn" aria-label="Canal anterior" title="Canal anterior (▼ / Página abajo)">CH▼</button>
             <button id="chUp" class="icon-btn" aria-label="Canal siguiente" title="Canal siguiente (▲ / Página arriba)">CH▲</button>
             <button id="fullBtn" class="icon-btn" aria-label="Pantalla completa" title="Pantalla completa (F)">⛶</button>
