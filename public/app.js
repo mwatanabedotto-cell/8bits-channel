@@ -179,7 +179,7 @@ function renderList() {
   renderQueue = [];
   currentGrid = null;
   if (!list.length) {
-    root.innerHTML = '<p class="empty">No hay canales con estos filtros.</p>';
+    root.innerHTML = '<p class="empty"><b>SIN SEÑAL</b>No hay canales con estos filtros.</p>';
     return;
   }
   for (const g of buildGroups(list)) {
@@ -306,7 +306,7 @@ function startStream() {
       Ábrela en VLC: <a href="${escapeHtml(s.url)}" target="_blank" rel="noopener noreferrer">enlace del stream</a>`);
     return;
   }
-  showMsg('Cargando…');
+  showMsg('<span class="tuning">SINTONIZANDO SEÑAL</span>');
   // El stream se considera accesible en cuanto llega vídeo, aunque el navegador
   // bloquee la reproducción automática (eso no es culpa del canal).
   const ok = () => { clearTimeout(p.timer); if (playing === p) showMsg(''); };
@@ -371,8 +371,8 @@ function onStreamFail(p, why) {
   }
   // Ninguna fuente funciona: el canal se elimina de la lista.
   refreshUsable();
-  showMsg(`<b>${escapeHtml(p.channel.name)}</b> no está accesible y se ha eliminado de la lista.`);
-  toast(`Eliminado: ${p.channel.name} (no accesible)`);
+  showMsg(`<b class="nosignal">SIN SEÑAL</b><br>${escapeHtml(p.channel.name)} no está accesible y se ha eliminado de la lista.`);
+  toast(`✕ ELIMINADO · ${p.channel.name} (no accesible)`);
   document.querySelector(`.card[data-id="${CSS.escape(p.channel.id)}"]`)?.remove();
   renderSidebar();
 }
@@ -394,7 +394,7 @@ function closeMenu() { $('#sidebar').classList.remove('open'); }
 
 // ---------- Inicio ----------
 async function init() {
-  $('#list').innerHTML = '<p class="empty">Cargando canales…</p>';
+  $('#list').innerHTML = '<p class="empty"><b class="tuning">CARGANDO</b>Recibiendo la lista de canales…</p>';
   let data;
   try {
     const res = await fetch('data/channels.json', { cache: 'no-cache' });

@@ -4,6 +4,13 @@ Visor web de los canales públicos de [iptv-org/iptv](https://github.com/iptv-or
 **ordenados por país y por enfoque (categoría)**, que **elimina automáticamente los
 canales no accesibles**.
 
+![Visor en escritorio](docs/captura-escritorio.png)
+
+Estética retrofuturista (synthwave / monitor CRT): neón magenta y cian, sol
+de líneas y rejilla en perspectiva, líneas de escaneo y tipografías Orbitron,
+Share Tech Mono y VT323. Las animaciones se desactivan si el sistema pide
+«reducir movimiento».
+
 ## Cómo funciona
 
 1. **Verificación en el servidor** (`scripts/build.mjs`): descarga los datos de la
