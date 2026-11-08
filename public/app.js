@@ -108,8 +108,11 @@ function renderSidebar() {
     ...countries.map((c) => {
       const li = document.createElement('li');
       li.className = c.code === state.country ? 'active' : '';
-      li.innerHTML = `<span>${c.flag}</span><span class="name"></span><small>${cCount.get(c.code) || 0}</small>`;
-      li.querySelector('.name').textContent = c.name;
+      li.innerHTML = '<span></span><span class="name"></span><small></small>';
+      const [flag, nm, count] = li.children;
+      flag.textContent = c.flag;
+      nm.textContent = c.name;
+      count.textContent = cCount.get(c.code) || 0;
       li.onclick = () => { state.country = state.country === c.code ? null : c.code; update(); closeMenu(); };
       return li;
     }),
@@ -237,8 +240,9 @@ function card(ch) {
   const meta = document.createElement('div');
   meta.className = 'meta';
   const q = ch._usable.map((s) => s.quality).filter(Boolean)[0];
-  meta.innerHTML = (q ? `<span class="badge">${q}</span>` : '') +
-    (ch._usable.some((s) => s.labels?.includes('Geo-blocked')) ? '<span class="badge">geo</span>' : '');
+  const badge = (t) => { const e = document.createElement('span'); e.className = 'badge'; e.textContent = t; meta.append(e); };
+  if (q) badge(q);
+  if (ch._usable.some((s) => s.geo || s.labels?.includes('Geo-blocked'))) badge('geo');
   meta.append(`${countryFlag(ch.country)} ${ch.categories.map(catName).join(', ')}`);
   b.append(logo, name, meta);
   b.onclick = () => play(ch);
@@ -257,7 +261,9 @@ function stopPlayback() {
   if (!playing) return;
   clearTimeout(playing.timer);
   playing.hls?.destroy();
+  playing.hls = null;
   const v = $('#video');
+  v.onplaying = v.onloadeddata = v.onerror = null;
   v.removeAttribute('src');
   v.load();
 }
@@ -294,24 +300,32 @@ function startStream() {
   const p = playing;
   const s = p.streams[p.index];
   const video = $('#video');
+  video.onplaying = video.onloadeddata = video.onerror = null;
   if (!browserPlayable(s)) {
     showMsg(`Esta fuente no se puede reproducir en el navegador.<br>
-      Ábrela en VLC: <a href="${s.url}" target="_blank" rel="noopener">copiar enlace</a>`);
+      Ábrela en VLC: <a href="${escapeHtml(s.url)}" target="_blank" rel="noopener noreferrer">enlace del stream</a>`);
     return;
   }
   showMsg('Cargando…');
+  // El stream se considera accesible en cuanto llega vídeo, aunque el navegador
+  // bloquee la reproducción automática (eso no es culpa del canal).
   const ok = () => { clearTimeout(p.timer); if (playing === p) showMsg(''); };
-  const fail = (why) => { if (playing === p) onStreamFail(p, why); };
+  const fail = (why) => { if (playing === p && !p.failed) { p.failed = true; onStreamFail(p, why); } };
+  const tryPlay = () => video.play().catch(() => {
+    video.muted = true; // autoplay con sonido bloqueado: reintentar en silencio
+    video.play().catch(() => { if (playing === p) showMsg('Pulsa ▶ para reproducir'); });
+  });
+  p.failed = false;
   p.timer = setTimeout(() => fail('tiempo de espera agotado'), PLAY_TIMEOUT);
   video.onplaying = ok;
-  video.onerror = () => fail('error del reproductor');
+  video.onloadeddata = ok;
 
   if (window.Hls?.isSupported()) {
     const hls = new Hls({ manifestLoadingMaxRetry: 1, levelLoadingMaxRetry: 1, fragLoadingMaxRetry: 2 });
     p.hls = hls;
     let recovered = false;
     hls.on(Hls.Events.ERROR, (_, d) => {
-      if (!d.fatal) return;
+      if (!d.fatal || playing !== p || p.hls !== hls) return;
       if (d.type === Hls.ErrorTypes.MEDIA_ERROR && !recovered) {
         recovered = true;
         hls.recoverMediaError();
@@ -319,12 +333,16 @@ function startStream() {
       }
       fail(d.details);
     });
+    hls.on(Hls.Events.FRAG_BUFFERED, ok);
+    hls.on(Hls.Events.MANIFEST_PARSED, tryPlay);
     hls.loadSource(s.url);
     hls.attachMedia(video);
-    hls.on(Hls.Events.MANIFEST_PARSED, () => video.play().catch(() => showMsg('Pulsa ▶ para reproducir')));
   } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-    video.src = s.url; // HLS nativo (Safari / iOS)
-    video.play().catch(() => {});
+    // HLS nativo (Safari / iOS). onerror solo aquí: con hls.js los errores
+    // del elemento <video> se gestionan por Hls.Events.ERROR.
+    video.onerror = () => fail('error del reproductor');
+    video.src = s.url;
+    tryPlay();
   } else {
     // Sin soporte HLS: no es culpa del canal, así que no se elimina.
     clearTimeout(p.timer);

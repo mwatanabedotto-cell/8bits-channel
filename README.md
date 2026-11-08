@@ -56,7 +56,8 @@ npm test
 
 Opciones de `scripts/build.mjs`: `--limit N`, `--concurrency N`, `--timeout MS`,
 `--iptv-dir RUTA` (clon de iptv-org/iptv para asignar país a streams sin canal),
-`--no-check`.
+`--no-check`, `--min-working N` (aborta si funcionan menos de N streams, por defecto 500,
+para no publicar un visor vacío si falla la red).
 
 ## Aviso
 
