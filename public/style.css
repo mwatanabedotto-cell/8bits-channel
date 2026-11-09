@@ -359,6 +359,8 @@ body.tv-full .toast { z-index: 400; }
   background: rgba(8, 2, 26, 0.8); border: 1px solid var(--border); color: var(--text);
   font: 18px var(--font-crt); letter-spacing: 0.1em; padding: 6px 16px; white-space: nowrap;
 }
+@media (max-width: 600px) { .full-hint { white-space: normal; text-align: center; width: 92vw; font-size: 16px; } }
+#fullBtn svg { display: block; }
 body.tv-full .osd { bottom: 14%; }
 
 /* Favoritos */
