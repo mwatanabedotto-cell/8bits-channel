@@ -16,7 +16,10 @@ const PAGE = window.Capacitor?.isNativePlatform?.() ? 96 : 200; // menos tarjeta
 // que se actualiza a diario; la copia incluida en la APK es el respaldo.
 const IS_APP = !!window.Capacitor?.isNativePlatform?.();
 const SITE_URL = 'https://mwatanabedotto-cell.github.io/8bits-channel/';
-const DATA_URLS = IS_APP ? [SITE_URL + 'data/channels.json', 'data/channels.json'] : ['data/channels.json'];
+// Copia en Vercel como segunda opción, por si GitHub Pages falla.
+const DATA_URLS = IS_APP
+  ? [SITE_URL + 'data/channels.json', 'https://8bits-channel.vercel.app/data/channels.json', 'data/channels.json']
+  : ['data/channels.json'];
 
 const $ = (s) => document.querySelector(s);
 const store = {

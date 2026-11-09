@@ -101,6 +101,12 @@ npm ci && npx cap sync android && (cd android && ./gradlew assembleRelease)
    (después se ejecuta solo cada día). La verificación completa tarda entre
    15 y 60 minutos.
 
+## Copia en Vercel
+
+`vercel.json` publica la carpeta `public/` sin compilar nada (la verificación
+completa supera el límite de 45 min de Vercel) y sirve `/data/*` desde la lista
+verificada que GitHub Pages publica cada día: https://8bits-channel.vercel.app/
+
 ## Uso local
 
 ```bash
