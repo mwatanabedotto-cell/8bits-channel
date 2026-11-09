@@ -426,3 +426,7 @@ body.tv-full .osd { bottom: 14%; }
   .onair, .tuning::after, .osd { animation: none; }
   .card, .card:hover { transition: none; transform: none; }
 }
+
+/* Acerca de (aviso legal visible) */
+.about p { color: var(--muted); font-size: 11.5px; line-height: 1.5; margin: 0 0 8px; }
+.about b { color: var(--text); font-weight: 400; }
