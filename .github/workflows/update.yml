@@ -1,8 +1,11 @@
 name: Verificar canales y publicar
 
 on:
+  # Dos horarios: GitHub a veces se salta ejecuciones programadas en
+  # repositorios nuevos o con mucha carga; así la lista se renueva igualmente.
   schedule:
-    - cron: '17 4 * * *' # todos los días a las 04:17 UTC
+    - cron: '17 4 * * *'  # 04:17 UTC
+    - cron: '47 16 * * *' # 16:47 UTC
   workflow_dispatch:
   push:
     branches: [main]

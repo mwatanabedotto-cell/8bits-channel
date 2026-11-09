@@ -398,22 +398,34 @@ function startStream() {
     clearTimeout(p.timer);
     if (playing !== p) return;
     showMsg('');
+    p.retries = 0;
     if (!p.started) {
       p.started = true;
       addToHistory(p.channel);
       armAutoFull();
     }
   };
-  const fail = (why) => { if (playing === p && !p.failed) { p.failed = true; onStreamFail(p, why); } };
+  const fail = (why) => {
+    if (playing !== p || p.failed) return;
+    p.failed = true;
+    // Un canal que ya se estaba viendo y se corta no se elimina: se reconecta.
+    if (p.started) reconnect(p, why);
+    else onStreamFail(p, why);
+  };
   // Siempre se intenta con sonido. Solo si el sistema bloquea el autoplay con
   // sonido se reproduce en silencio y se muestra «Activar sonido».
+  const attempt = (p.attempt = (p.attempt || 0) + 1);
+  const current = () => playing === p && p.attempt === attempt && !p.lost;
   const tryPlay = () => {
     if (autoMuted) { video.muted = false; autoMuted = false; }
-    video.play().then(updateSoundHint).catch(() => {
+    video.play().then(updateSoundHint).catch((err) => {
+      // Solo «NotAllowedError» significa sonido bloqueado. Un AbortError es una
+      // reproducción interrumpida (cambio de canal, reconexión): se ignora.
+      if (err?.name !== 'NotAllowedError' || !current()) return;
       video.muted = true;
       autoMuted = true;
       updateSoundHint();
-      video.play().catch(() => { if (playing === p) showMsg('Pulsa ▶ para reproducir'); });
+      video.play().catch((e2) => { if (e2?.name === 'NotAllowedError' && current()) showMsg('Pulsa ▶ para reproducir'); });
     });
   };
   p.failed = false;
@@ -456,6 +468,35 @@ function startStream() {
     clearTimeout(p.timer);
     showMsg('Tu navegador no puede reproducir HLS. Usa la lista M3U en VLC.');
   }
+}
+
+// Corte en un canal que funcionaba (red inestable, el emisor se cae un momento…):
+// se reintenta varias veces y luego se prueban las otras fuentes, sin marcar
+// nada como roto. Si sigue sin volver, se avisa y OK reintenta.
+function reconnect(p, why) {
+  clearTimeout(p.timer);
+  p.hls?.destroy();
+  p.hls = null;
+  console.warn('Corte de señal, reconectando', why);
+  p.retries = (p.retries || 0) + 1;
+  if (p.retries > 3 && p.index + 1 < p.streams.length) {
+    p.index++;
+    p.retries = 0;
+    $('#streamSelect').value = p.index;
+  } else if (p.retries > 3) {
+    p.lost = true;
+    showMsg('<b class="nosignal">SEÑAL PERDIDA</b><br>Pulsa OK (o elige el canal) para reintentar.');
+    return;
+  }
+  showMsg('<span class="tuning">RECONECTANDO</span>');
+  setTimeout(() => { if (playing === p) startStream(); }, 2000);
+}
+function retryLost() {
+  if (!playing?.lost) return false;
+  playing.lost = false;
+  playing.retries = 0;
+  startStream();
+  return true;
 }
 
 function onStreamFail(p, why) {
@@ -563,7 +604,13 @@ const INERT = ['.topbar', '#sidebar', '#rows', '#list', '.player-info'];
 function armAutoFull() {
   clearTimeout(autoFullTimer);
   if (!playing?.started || fullOn) return;
-  autoFullTimer = setTimeout(() => { if (playing?.started && !fullOn) enterFull(); }, AUTO_FULL_MS);
+  autoFullTimer = setTimeout(() => {
+    if (!playing?.started || fullOn) return;
+    const a = document.activeElement;
+    const editing = a && (a.tagName === 'SELECT' || (a.tagName === 'INPUT' && !a.readOnly && a.type !== 'checkbox' && a.type !== 'radio'));
+    if (editing || $('#sidebar').classList.contains('open')) { armAutoFull(); return; }
+    enterFull();
+  }, AUTO_FULL_MS);
 }
 function enterFull() {
   if (!playing || fullOn) return;
@@ -600,7 +647,7 @@ let hintTimer;
 function flashHint() {
   const h = $('#fullHint');
   h.textContent = matchMedia('(hover: none)').matches && !IS_APP
-    ? 'Desliza ▲▼ para cambiar de canal · Toca para salir'
+    ? 'Desliza ▲▼ para cambiar de canal · Toca para ver «Salir»'
     : '▲ ▼  CAMBIAR CANAL   ·   OK  INFO   ·   ATRÁS  SALIR';
   h.hidden = false;
   clearTimeout(hintTimer);
@@ -631,7 +678,9 @@ function onKey(e) {
     if (chDown || k === 'ArrowDown') { e.preventDefault(); zap(-1); return; }
     if (k === 'Escape' || k === 'Backspace' || k === 'GoBack' || k === 'BrowserBack') { e.preventDefault(); exitFull(); return; }
     if (k === 'Enter' || k === ' ' || k === 'ArrowLeft' || k === 'ArrowRight' || k === 'i' || k === 'Info') {
-      e.preventDefault(); showOsd(playing.channel); flashHint(); return;
+      e.preventDefault();
+      if ((k === 'Enter' || k === ' ') && retryLost()) return;
+      showOsd(playing.channel); flashHint(); return;
     }
   } else {
     if (chUp) { e.preventDefault(); zap(+1); return; }
@@ -707,7 +756,7 @@ function closePlayer() {
 // Ajustes propios de la APK de Android
 function setupApp() {
   document.documentElement.classList.add('is-app');
-  document.querySelector('.toggle').lastChild.textContent = ' Solo canales reproducibles en la app';
+  $('#browserOnly').parentElement.lastChild.textContent = ' Solo canales reproducibles en la app';
   const m3u = document.querySelector('a[href="data/playlist.m3u"]');
   if (m3u) { m3u.href = SITE_URL + 'data/playlist.m3u'; m3u.removeAttribute('download'); m3u.target = '_blank'; }
   // Botón «atrás»: cierra pantalla completa, menú o reproductor antes de salir.
