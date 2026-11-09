@@ -42,16 +42,21 @@ Share Tech Mono y VT323. Las animaciones se desactivan si el sistema pide
   (bloqueados en páginas https), DASH o que necesitan cabeceras especiales.
   Desactívalo para verlos y abrirlos en un reproductor externo.
 - Selector de fuente cuando un canal tiene varias, logos y calidad.
+- **Inicio tipo TV**: filas horizontales con los **últimos 10 canales vistos**
+  y los **favoritos**, navegables con las flechas del mando.
+- **Pantalla completa automática** a los 10 s de ver un canal sin tocar el
+  mando. Dentro: ▲▼ cambian de canal, OK muestra la info, Atrás sale.
+- Buscadores que solo abren el teclado al pulsar OK (o tocar), no al pasar
+  por encima con el mando. La búsqueda ignora acentos.
 - **Zapping como en una TV**: cada canal tiene número fijo (001, 002…).
-  - Mando / teclado: **CH+ / CH−** (o Re Pág / Av Pág), flechas **▲ ▼** en
-    pantalla completa o con el foco en el vídeo, **números** para ir a un canal,
+  - Mando / teclado: **CH+ / CH−** (o Re Pág / Av Pág), **números** para ir a un canal,
     **i** / OK para ver el rótulo, **F** para pantalla completa.
-  - Móvil: botones **CH▲ / CH▼** o deslizar arriba/abajo sobre el vídeo.
+  - Móvil: deslizar arriba/abajo sobre el vídeo en pantalla completa.
   - Al cambiar aparece el rótulo con número, nombre y país. Si un canal no
     tiene señal se elimina y salta solo al siguiente, en la misma dirección.
   - Al abrir (web y app) se pone el último canal visto.
 - **Favoritos**: botón ☆ en el reproductor (o tecla `*` del mando). Salen
-  arriba en «★ Favoritos» y con «Solo mis favoritos» el zapping va solo por ellos.
+  en la fila «★ Favoritos» y con «Solo mis favoritos» el zapping va solo por ellos.
 - Sonido: en la app la TV reproduce con sonido sin tocar la pantalla. Si un
   navegador bloquea el sonido automático, aparece «🔇 Activar sonido» y se
   activa con cualquier tecla o toque.
