@@ -17,7 +17,7 @@
   <header class="topbar">
     <button id="menuBtn" class="icon-btn" aria-label="Filtros">☰</button>
     <h1 class="brand"><span class="brand-8">8BITS</span><span class="brand-ch">CHANNEL</span></h1>
-    <input id="search" type="search" placeholder="&gt; buscar canal_" autocomplete="off" />
+    <input id="search" type="search" placeholder="🔍 buscar canal_" autocomplete="off" readonly />
     <span id="stats" class="stats"></span>
   </header>
 
@@ -49,7 +49,7 @@
       </section>
       <section class="grow">
         <h2>País <button id="clearCountry" class="link">limpiar</button></h2>
-        <input id="countrySearch" type="search" placeholder="Filtrar países…" />
+        <input id="countrySearch" type="search" placeholder="🔍 filtrar países…" autocomplete="off" readonly />
         <ul id="countries" class="countries"></ul>
       </section>
       <section>
@@ -69,8 +69,8 @@
             <div class="osd-body"><div class="osd-name"></div><div class="osd-meta"></div></div>
           </div>
           <button id="soundBtn" class="sound-btn" hidden>🔇 ACTIVAR SONIDO</button>
-          <button id="zapUp" class="zap zap-up" aria-label="Canal siguiente">▲</button>
-          <button id="zapDown" class="zap zap-down" aria-label="Canal anterior">▼</button>
+          <button id="exitFull" class="exit-full" hidden>✕ SALIR DE PANTALLA COMPLETA</button>
+          <div id="fullHint" class="full-hint" hidden></div>
         </div>
         <div class="player-info">
           <img id="playerLogo" alt="" />
@@ -81,11 +81,19 @@
           <select id="streamSelect" aria-label="Fuente"></select>
           <div class="zapbar">
             <button id="favBtn" class="icon-btn fav-btn" aria-label="Favorito" title="Añadir a favoritos (*)">☆</button>
-            <button id="chDown" class="icon-btn" aria-label="Canal anterior" title="Canal anterior (▼ / Página abajo)">CH▼</button>
-            <button id="chUp" class="icon-btn" aria-label="Canal siguiente" title="Canal siguiente (▲ / Página arriba)">CH▲</button>
             <button id="fullBtn" class="icon-btn" aria-label="Pantalla completa" title="Pantalla completa (F)">⛶</button>
           </div>
           <button id="closePlayer" class="icon-btn" aria-label="Cerrar">✕</button>
+        </div>
+      </section>
+      <section id="rows" class="rows">
+        <div class="row-block" id="recentBlock" hidden>
+          <h2 class="row-title">⟲ Últimos vistos</h2>
+          <div class="row" id="recentRow"></div>
+        </div>
+        <div class="row-block" id="favBlock" hidden>
+          <h2 class="row-title">★ Favoritos</h2>
+          <div class="row" id="favRow"></div>
         </div>
       </section>
       <div id="list"></div>

@@ -6,6 +6,9 @@ const BROKEN_KEY = 'iptv.broken.v1';
 const PREFS_KEY = 'iptv.prefs.v1';
 const LAST_KEY = 'iptv.last.v1';
 const FAVS_KEY = 'iptv.favs.v1';
+const HISTORY_KEY = 'iptv.history.v1';
+const HISTORY_MAX = 10;
+const AUTO_FULL_MS = 10000; // pantalla completa tras 10 s viendo un canal sin tocar nada
 const BROKEN_TTL = 3 * 24 * 3600 * 1000; // se reintenta a los 3 días
 const PLAY_TIMEOUT = 20000;
 const PAGE = window.Capacitor?.isNativePlatform?.() ? 96 : 200; // menos tarjetas por tanda en TV/móvil
@@ -48,6 +51,7 @@ function restorePrefs() {
     browserOnly: p.browserOnly ?? true,
     favOnly: !!p.favOnly,
     favs: new Set(store.get(FAVS_KEY, [])),
+    history: store.get(HISTORY_KEY, []),
   };
 }
 function savePrefs() {
@@ -182,11 +186,7 @@ function buildGroups(list) {
         .sort((a, b) => subSortKey(a[0]).localeCompare(subSortKey(b[0]), 'es'))
         .map(([s, chs]) => ({ title: subLabel(s), channels: chs })),
     }));
-  // ★ Favoritos siempre arriba (y primeros al hacer zapping)
   const favs = list.filter((ch) => state.favs.has(ch.id)).sort((a, b) => a._num - b._num);
-  if (favs.length && !state.favOnly) {
-    result.unshift({ title: '★ Favoritos', count: favs.length, subs: [{ title: 'Mis canales', channels: favs }] });
-  }
   if (state.favOnly) return [{ title: '★ Favoritos', count: favs.length, subs: [{ title: 'Mis canales', channels: favs }] }];
   return result;
 }
@@ -209,6 +209,28 @@ function updateFavBtn() {
   $('#favBtn').classList.toggle('on', !!fav);
   $('#favBtn').title = fav ? 'Quitar de favoritos (*)' : 'Añadir a favoritos (*)';
   $('#favCount').textContent = state.favs.size;
+}
+
+// ---------- Filas de inicio: últimos vistos y favoritos ----------
+function renderRows() {
+  // Conservar el foco del mando si estaba en una de las filas
+  const active = document.activeElement;
+  const keep = active?.closest?.('.row') && { row: active.closest('.row').id, id: active.dataset.id };
+  const fill = (rowId, blockId, chans) => {
+    $(rowId).replaceChildren(...chans.map(card));
+    $(blockId).hidden = !chans.length;
+  };
+  const byId = new Map(state.channels.map((c) => [c.id, c]));
+  const recent = state.history.map((id) => byId.get(id)).filter((c) => c && c._usable.length);
+  const favs = state.channels.filter((c) => state.favs.has(c.id) && c._usable.length).sort((a, b) => a._num - b._num);
+  fill('#recentRow', '#recentBlock', recent);
+  fill('#favRow', '#favBlock', favs);
+  if (keep) document.querySelector(`#${keep.row} .card[data-id="${CSS.escape(keep.id || '')}"]`)?.focus({ preventScroll: true });
+}
+function addToHistory(ch) {
+  state.history = [ch.id, ...state.history.filter((id) => id !== ch.id)].slice(0, HISTORY_MAX);
+  store.set(HISTORY_KEY, state.history);
+  renderRows();
 }
 
 function renderList() {
@@ -307,6 +329,7 @@ function card(ch) {
 function update() {
   savePrefs();
   renderSidebar();
+  renderRows();
   renderList();
   $('main').scrollTop = playing ? $('main').scrollTop : 0;
 }
@@ -324,6 +347,8 @@ function stopPlayback() {
 }
 
 const fmtNum = (n) => String(n).padStart(3, '0');
+// Minúsculas y sin acentos, para que «musica» encuentre «Música»
+function fold(str) { return str.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase(); }
 
 function play(ch, index = 0, { dir = 0, skips = 0 } = {}) {
   stopPlayback();
@@ -332,7 +357,7 @@ function play(ch, index = 0, { dir = 0, skips = 0 } = {}) {
   store.set(LAST_KEY, ch.id);
   showOsd(ch);
   document.querySelectorAll('.card.playing').forEach((c) => c.classList.remove('playing'));
-  document.querySelector(`.card[data-id="${CSS.escape(ch.id)}"]`)?.classList.add('playing');
+  document.querySelectorAll(`.card[data-id="${CSS.escape(ch.id)}"]`).forEach((c) => c.classList.add('playing'));
 
   $('#player').hidden = false;
   $('#playerName').textContent = ch.name;
@@ -369,7 +394,16 @@ function startStream() {
   showMsg('<span class="tuning">SINTONIZANDO SEÑAL</span>');
   // El stream se considera accesible en cuanto llega vídeo, aunque el navegador
   // bloquee la reproducción automática (eso no es culpa del canal).
-  const ok = () => { clearTimeout(p.timer); if (playing === p) showMsg(''); };
+  const ok = () => {
+    clearTimeout(p.timer);
+    if (playing !== p) return;
+    showMsg('');
+    if (!p.started) {
+      p.started = true;
+      addToHistory(p.channel);
+      armAutoFull();
+    }
+  };
   const fail = (why) => { if (playing === p && !p.failed) { p.failed = true; onStreamFail(p, why); } };
   // Siempre se intenta con sonido. Solo si el sistema bloquea el autoplay con
   // sonido se reproduce en silencio y se muestra «Activar sonido».
@@ -447,7 +481,8 @@ function onStreamFail(p, why) {
   refreshUsable();
   showMsg(`<b class="nosignal">SIN SEÑAL</b><br>${escapeHtml(p.channel.name)} no está accesible y se ha eliminado de la lista.`);
   toast(`✕ ELIMINADO · ${p.channel.name} (no accesible)`);
-  document.querySelector(`.card[data-id="${CSS.escape(p.channel.id)}"]`)?.remove();
+  document.querySelectorAll(`.card[data-id="${CSS.escape(p.channel.id)}"]`).forEach((c) => c.remove());
+  renderRows();
   const removedIdx = state.lineup.indexOf(p.channel);
   state.lineup = state.lineup.filter((c) => c._usable.length);
   renderSidebar();
@@ -517,31 +552,94 @@ function typeDigit(d) {
   }, 1500);
 }
 
-function toggleFullscreen() {
-  const wrap = $('.video-wrap');
-  if (document.fullscreenElement) document.exitFullscreen();
-  else wrap.requestFullscreen?.().catch(() => {});
+// ---------- Pantalla completa estilo TV ----------
+// Se hace con CSS (el vídeo ocupa toda la pantalla de la app) porque los
+// navegadores no permiten pedir pantalla completa real sin una pulsación,
+// y aquí se activa sola a los 10 s. Si hay pulsación reciente, también se
+// pide la pantalla completa real del navegador.
+let fullOn = false;
+let autoFullTimer;
+const INERT = ['.topbar', '#sidebar', '#rows', '#list', '.player-info'];
+function armAutoFull() {
+  clearTimeout(autoFullTimer);
+  if (!playing?.started || fullOn) return;
+  autoFullTimer = setTimeout(() => { if (playing?.started && !fullOn) enterFull(); }, AUTO_FULL_MS);
+}
+function enterFull() {
+  if (!playing || fullOn) return;
+  fullOn = true;
+  clearTimeout(autoFullTimer);
+  closeMenu();
+  document.body.classList.add('tv-full');
+  INERT.forEach((sel) => document.querySelector(sel)?.setAttribute('inert', ''));
+  $('#video').controls = false;
+  $('.video-wrap').focus({ preventScroll: true });
+  if (navigator.userActivation?.isActive && !document.fullscreenElement) {
+    document.documentElement.requestFullscreen?.().catch(() => {});
+  }
+  showOsd(playing.channel);
+  flashHint();
+}
+function exitFull() {
+  if (!fullOn) return;
+  fullOn = false;
+  document.body.classList.remove('tv-full');
+  INERT.forEach((sel) => document.querySelector(sel)?.removeAttribute('inert'));
+  $('#video').controls = true;
+  $('#exitFull').hidden = true;
+  $('#fullHint').hidden = true;
+  if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+  // Devolver el foco a la tarjeta del canal (o al botón de favorito)
+  const id = playing && CSS.escape(playing.channel.id);
+  const target = (id && document.querySelector(`#rows .card[data-id="${id}"], #list .card[data-id="${id}"]`)) || $('#favBtn');
+  target?.focus({ preventScroll: false });
+  armAutoFull();
+}
+function toggleFullscreen() { fullOn ? exitFull() : enterFull(); }
+let hintTimer;
+function flashHint() {
+  const h = $('#fullHint');
+  h.textContent = matchMedia('(hover: none)').matches && !IS_APP
+    ? 'Desliza ▲▼ para cambiar de canal · Toca para salir'
+    : '▲ ▼  CAMBIAR CANAL   ·   OK  INFO   ·   ATRÁS  SALIR';
+  h.hidden = false;
+  clearTimeout(hintTimer);
+  hintTimer = setTimeout(() => { h.hidden = true; }, 4000);
+}
+let exitBtnTimer;
+function showExitBtn() {
+  if (!fullOn) return;
+  $('#exitFull').hidden = false;
+  clearTimeout(exitBtnTimer);
+  exitBtnTimer = setTimeout(() => { $('#exitFull').hidden = true; }, 3000);
 }
 
 function onKey(e) {
   const t = e.target;
-  const typing = t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA';
-  if (typing) return;
-  const full = !!document.fullscreenElement;
-  const videoFocused = t.closest?.('.video-wrap') || t === document.body;
   const k = e.key;
   const code = e.keyCode;
   unmute(); // cualquier tecla del mando cuenta como interacción: activar sonido
+  armAutoFull(); // mientras se usa el mando no salta la pantalla completa
+  const typing = !fullOn && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA');
+  if (typing) return;
   // Teclas de canal del mando (KEYCODE_CHANNEL_UP/DOWN = 166/167) y Re Pág / Av Pág
   const chUp = k === 'ChannelUp' || k === 'PageUp' || code === 166;
   const chDown = k === 'ChannelDown' || k === 'PageDown' || code === 167;
-  // Flechas ▲▼: cambian canal en pantalla completa o con el foco en el vídeo
-  const arrowZap = playing && (full || (videoFocused && !$('#sidebar').classList.contains('open')));
-  if (chUp || (arrowZap && k === 'ArrowUp')) { e.preventDefault(); zap(+1); return; }
-  if (chDown || (arrowZap && k === 'ArrowDown')) { e.preventDefault(); zap(-1); return; }
+  // En pantalla completa el mando funciona como el de una TV
+  if (fullOn) {
+    if (chUp || k === 'ArrowUp') { e.preventDefault(); zap(+1); return; }
+    if (chDown || k === 'ArrowDown') { e.preventDefault(); zap(-1); return; }
+    if (k === 'Escape' || k === 'Backspace' || k === 'GoBack' || k === 'BrowserBack') { e.preventDefault(); exitFull(); return; }
+    if (k === 'Enter' || k === ' ' || k === 'ArrowLeft' || k === 'ArrowRight' || k === 'i' || k === 'Info') {
+      e.preventDefault(); showOsd(playing.channel); flashHint(); return;
+    }
+  } else {
+    if (chUp) { e.preventDefault(); zap(+1); return; }
+    if (chDown) { e.preventDefault(); zap(-1); return; }
+  }
   if (/^[0-9]$/.test(k)) { e.preventDefault(); typeDigit(k); return; }
   if (playing && (k === '*' || k === 'Bookmark' || k === 'ColorF2Yellow' || code === 174)) { e.preventDefault(); toggleFav(playing.channel); return; }
-  if (playing && (k === 'i' || k === 'Info' || (full && k === 'Enter'))) { e.preventDefault(); showOsd(playing.channel); return; }
+  if (playing && (k === 'i' || k === 'Info')) { e.preventDefault(); showOsd(playing.channel); return; }
   if (playing && (k === 'f' || k === 'F')) { e.preventDefault(); toggleFullscreen(); }
 }
 
@@ -556,7 +654,7 @@ function setupSwipe() {
     const dy = e.changedTouches[0].clientY - y0;
     const dx = e.changedTouches[0].clientX - x0;
     y0 = null;
-    if (Math.abs(dy) > 70 && Math.abs(dy) > Math.abs(dx) * 1.5) zap(dy < 0 ? +1 : -1);
+    if (fullOn && Math.abs(dy) > 70 && Math.abs(dy) > Math.abs(dx) * 1.5) zap(dy < 0 ? +1 : -1);
   }, { passive: true });
 }
 
@@ -576,8 +674,30 @@ function toast(text, kind = '') {
 
 function closeMenu() { $('#sidebar').classList.remove('open'); }
 
+// Campo de texto que solo se edita al pulsarlo (OK del mando, clic o toque).
+// Con solo pasar el foco por encima no se abre el teclado en pantalla.
+function tapToEdit(input) {
+  input.readOnly = true;
+  let switching = false;
+  const edit = () => {
+    if (!input.readOnly) return;
+    switching = true;
+    input.readOnly = false;
+    input.blur();
+    input.focus();
+    switching = false;
+  };
+  input.addEventListener('click', edit);
+  input.addEventListener('keydown', (e) => {
+    if (input.readOnly && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); edit(); }
+    else if (!input.readOnly && e.key === 'Enter') input.blur(); // cierra el teclado
+  });
+  input.addEventListener('blur', () => { if (!switching) input.readOnly = true; });
+}
+
 function closePlayer() {
-  if (document.fullscreenElement) document.exitFullscreen();
+  exitFull();
+  clearTimeout(autoFullTimer);
   stopPlayback();
   playing = null;
   $('#player').hidden = true;
@@ -592,7 +712,7 @@ function setupApp() {
   if (m3u) { m3u.href = SITE_URL + 'data/playlist.m3u'; m3u.removeAttribute('download'); m3u.target = '_blank'; }
   // Botón «atrás»: cierra pantalla completa, menú o reproductor antes de salir.
   window.Capacitor.Plugins?.App?.addListener('backButton', () => {
-    if (document.fullscreenElement) document.exitFullscreen();
+    if (fullOn) exitFull();
     else if ($('#sidebar').classList.contains('open')) closeMenu();
     else if (playing) closePlayer();
     else window.Capacitor.Plugins.App.exitApp();
@@ -650,7 +770,7 @@ async function init() {
   state.updated = new Date(data.meta.updated).toLocaleDateString('es', { day: 'numeric', month: 'short', year: 'numeric' });
   state.channels = data.channels.map((ch) => ({
     ...ch,
-    _search: `${ch.name} ${ch.streams.map((s) => s.title || '').join(' ')}`.toLowerCase(),
+    _search: fold(`${ch.name} ${ch.streams.map((s) => s.title || '').join(' ')}`),
   }));
   if (state.country && !state.countries.has(state.country)) state.country = null;
   // Números de canal fijos (por país, enfoque y nombre), como en una TV.
@@ -668,7 +788,7 @@ async function init() {
   let t;
   $('#search').oninput = (e) => {
     clearTimeout(t);
-    t = setTimeout(() => { state.q = e.target.value.trim().toLowerCase(); update(); }, 150);
+    t = setTimeout(() => { state.q = fold(e.target.value.trim()); update(); }, 150);
   };
   $('#countrySearch').oninput = renderSidebar;
   $('#browserOnly').onchange = (e) => { state.browserOnly = e.target.checked; refreshUsable(); update(); };
@@ -680,8 +800,6 @@ async function init() {
   $('#resetBroken').onclick = () => { state.broken.clear(); saveBroken(); refreshUsable(); update(); };
   $('#streamSelect').onchange = (e) => { stopPlayback(); playing.index = Number(e.target.value); startStream(); };
   $('#closePlayer').onclick = closePlayer;
-  $('#chUp').onclick = $('#zapUp').onclick = () => zap(+1);
-  $('#chDown').onclick = $('#zapDown').onclick = () => zap(-1);
   $('#fullBtn').onclick = toggleFullscreen;
   $('#favBtn').onclick = () => playing && toggleFav(playing.channel);
   $('#soundBtn').onclick = unmute;
@@ -691,6 +809,15 @@ async function init() {
   $('#favCount').textContent = state.favs.size;
   $('.video-wrap').tabIndex = 0;
   $('.video-wrap').ondblclick = toggleFullscreen;
+  $('#exitFull').onclick = (e) => { e.stopPropagation(); exitFull(); };
+  // Ratón / toque: en pantalla completa muestra «Salir»; fuera, retrasa la pantalla completa
+  ['pointerdown', 'pointermove', 'wheel'].forEach((ev) => document.addEventListener(ev, () => { fullOn ? showExitBtn() : armAutoFull(); }, { passive: true }));
+  $('main').addEventListener('scroll', () => armAutoFull(), { passive: true });
+  // Si se sale de la pantalla completa real del navegador (Esc), salir también del modo TV
+  document.addEventListener('fullscreenchange', () => { if (!document.fullscreenElement && fullOn) exitFull(); });
+  // Buscadores: el teclado solo aparece al pulsar OK / tocar, no al pasar por encima
+  tapToEdit($('#search'));
+  tapToEdit($('#countrySearch'));
   document.addEventListener('keydown', onKey);
   setupSwipe();
   $('#menuBtn').onclick = () => $('#sidebar').classList.toggle('open');
